@@ -9,7 +9,7 @@ on:
       - "kubernetes/vets-service/**"
       - ".github/workflows/ci.yaml"
   push:
-    branches: [ main ]
+    branches: [ main, githubcicheck ]
     paths:
       - "app/**"
       - "kubernetes/vets-service/**"
@@ -95,8 +95,8 @@ jobs:
 
   updatek8s:
     runs-on: ubuntu-latest
-    needs: [docker]
-    if: needs.docker.result == 'success'
+    needs: [build, docker, code-quality]
+    if: needs.docker.result == 'success' && github.event_name == 'push'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -113,10 +113,9 @@ jobs:
           sed -i "s|image: .*vets-service:.*|image: ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}|g" "$FILE"
 
       - name: Commit and push changes
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config --global user.email "teju.654@gmail.com"
           git config --global user.name "tejupagudala"
           git add kubernetes/vets-service/deployment.yaml
           git commit -m "[CI]: Update vets-service image tag to ${{ github.run_id }}" || echo "No changes to commit"
-          git push origin HEAD:main
+          git push origin HEAD:${{ github.ref_name }}
