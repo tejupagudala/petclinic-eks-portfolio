@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vets-service
+  namespace: petclinic
+  labels:
+    app.kubernetes.io/name: vets-service
+    app.kubernetes.io/part-of: petclinic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vets-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vets-service
+        app.kubernetes.io/part-of: petclinic
+    spec:
+      containers:
+        - name: vets-service
+          image: tejupagudala/vets-service:v2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          env:
+            - name: SPRING_APPLICATION_NAME
+              value: vets-service
+            - name: SERVER_PORT
+              value: "8083"
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: SPRING_CONFIG_IMPORT
+              value: optional:configserver:http://config-server:8888/
+            - name: SPRING_CLOUD_CONFIG_URI
+              value: http://config-server:8888
+            - name: CONFIG_SERVER_URL
+              value: http://config-server:8888/
+            - name: EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE
+              value: http://discovery-server:8761/eureka/
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: http://discovery-server:8761/eureka/
+            - name: EUREKA_INSTANCE_PREFER_IP_ADDRESS
+              value: "true"
+            - name: EUREKA_CLIENT_ENABLED
+              value: "true"
+            - name: EUREKA_CLIENT_REGISTER_WITH_EUREKA
+              value: "true"
+            - name: EUREKA_CLIENT_FETCH_REGISTRY
+              value: "true"
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+            - name: SPRING_DATASOURCE_USERNAME
+              value: petclinic
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: petclinic
+            - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+              value: com.mysql.cj.jdbc.Driver
+            - name: SPRING_SQL_INIT_MODE
+              value: always
+            - name: SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION
+              value: "false"
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: none
+            - name: SPRING_SQL_INIT_SCHEMA_LOCATIONS
+              value: classpath:/db/mysql/schema.sql
+            - name: SPRING_SQL_INIT_DATA_LOCATIONS
+              value: classpath:/db/mysql/data.sql
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"

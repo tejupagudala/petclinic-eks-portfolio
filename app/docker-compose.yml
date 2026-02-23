@@ -1,0 +1,304 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: petclinic
+      MYSQL_USER: petclinic
+      MYSQL_PASSWORD: petclinic
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+
+  config-server:
+    image: tejupagudala/config-server:v3
+    container_name: config-server
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-I", "http://localhost:8888/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+     - 8888:8888
+
+  discovery-server:
+   image: tejupagudala/discovery-server:v2
+   container_name: discovery-server
+   environment:
+    - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/
+    - JAVA_TOOL_OPTIONS=-Dserver.port=8761
+    - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+    - EUREKA_CLIENT_FETCH_REGISTRY=false
+   deploy:
+    resources:
+      limits:
+        memory: 512M
+   healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8761/"]
+    interval: 10s
+    timeout: 5s
+    retries: 20
+    start_period: 60s
+   depends_on:
+    config-server:
+      condition: service_healthy
+   ports:
+     - 8761:8761
+
+  customers-service:
+    image: tejupagudala/customers-service:v3
+    container_name: customers-service
+    environment:
+      SPRING_APPLICATION_NAME: customers-service   # (or vets-service / visits-service)
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888/
+      CONFIG_SERVER_URL: http://config-server:8888/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+      SERVER_PORT: "8081"
+      SPRING_PROFILES_ACTIVE: "docker"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: "petclinic"
+      SPRING_DATASOURCE_PASSWORD: "petclinic"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_SQL_INIT_MODE: always
+      SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: "false"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      SPRING_SQL_INIT_SCHEMA_LOCATIONS: classpath:/db/mysql/schema.sql
+      SPRING_SQL_INIT_DATA_LOCATIONS: classpath:/db/mysql/data.sql
+
+      EUREKA_CLIENT_ENABLED: true
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: true
+      EUREKA_CLIENT_FETCH_REGISTRY: true
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+     - 8081:8081
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    
+  visits-service:
+    image: tejupagudala/visits-service:v1
+    container_name: visits-service
+    environment:
+      SPRING_APPLICATION_NAME: visits-service   # (or vets-service / visits-service)
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888/
+      CONFIG_SERVER_URL: http://config-server:8888/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+      SERVER_PORT: "8082"   # optional but helps force it
+      SPRING_PROFILES_ACTIVE: "docker"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: "petclinic"
+      SPRING_DATASOURCE_PASSWORD: "petclinic"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_SQL_INIT_MODE: always
+      SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: "false"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      SPRING_SQL_INIT_SCHEMA_LOCATIONS: classpath:/db/mysql/schema.sql
+      SPRING_SQL_INIT_DATA_LOCATIONS: classpath:/db/mysql/data.sql
+      
+
+      EUREKA_CLIENT_ENABLED: true
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: true
+      EUREKA_CLIENT_FETCH_REGISTRY: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+      customers-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+     - 8082:8082
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  vets-service:
+    image: tejupagudala/vets-service:v2
+    container_name: vets-service
+    environment:
+      SPRING_APPLICATION_NAME: "vets-service"
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888/"
+      CONFIG_SERVER_URL: http://config-server:8888/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: "http://discovery-server:8761/eureka/"
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+      SERVER_PORT: "8083"
+      SPRING_PROFILES_ACTIVE: "docker"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: "petclinic"
+      SPRING_DATASOURCE_PASSWORD: "petclinic"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_SQL_INIT_MODE: always
+      SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: "false"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      SPRING_SQL_INIT_SCHEMA_LOCATIONS: classpath:/db/mysql/schema.sql
+      SPRING_SQL_INIT_DATA_LOCATIONS: classpath:/db/mysql/data.sql
+
+
+      EUREKA_CLIENT_ENABLED: true
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: true
+      EUREKA_CLIENT_FETCH_REGISTRY: true
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+     - 8083:8083
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  genai-service:
+    image: tejupagudala/genai-service:v2
+    container_name: genai-service
+    environment:
+      SPRING_APPLICATION_NAME: "genai-service"
+      SPRING_PROFILES_ACTIVE: "docker"
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888/"
+      CONFIG_SERVER_URL: http://config-server:8888/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: "http://discovery-server:8761/eureka/"
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    ports:
+     - 8084:8084
+
+
+  api-gateway:
+    image: tejupagudala/api-gateway:v3
+    container_name: api-gateway
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: "docker"
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888/"
+      CONFIG_SERVER_URL: http://config-server:8888/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+      EUREKA_CLIENT_ENABLED: "true"
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: "true"
+      EUREKA_CLIENT_FETCH_REGISTRY: "true"
+
+            # Actuator (optional but helps debugging)
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,gateway,mappings"
+      MANAGEMENT_ENDPOINT_GATEWAY_ENABLED: "true"
+      MANAGEMENT_ENDPOINT_MAPPINGS_ENABLED: "true"
+
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      customers-service:
+        condition: service_healthy
+      vets-service:
+        condition: service_healthy
+      visits-service:
+        condition: service_healthy
+    ports:
+     - 8080:8080
+
+  tracing-server:
+    image: openzipkin/zipkin
+    container_name: tracing-server
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+     - 9411:9411
+
+  admin-server:
+    image: tejupagudala/admin-server:v1
+    container_name: admin-server
+    environment:
+      - SPRING_CLOUD_CONFIG_ENABLED=false
+      - SPRING_CONFIG_IMPORT=
+      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_APPLICATION_NAME=admin-server
+      - SERVER_PORT=9090
+      - EUREKA_CLIENT_ENABLED=true
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=true
+      - EUREKA_CLIENT_FETCH_REGISTRY=true
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE=http://discovery-server:8761/eureka/
+      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    ports:
+     - 9090:9090
+
+  ## Grafana / Prometheus
+
+  grafana-server:
+    build: ./docker/grafana
+    container_name: grafana-server
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    ports:
+    - 3030:3000
+
+  prometheus-server:
+    build: ./docker/prometheus
+    container_name: prometheus-server
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    ports:
+    - 9091:9090
+
+volumes:
+   mysql-data:

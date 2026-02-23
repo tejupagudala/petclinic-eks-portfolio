@@ -1,0 +1,41 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+terraform/crash.log
+terraform/crash.*.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
+
+# Terraform (nested modules/backends)
+terraform/**/.terraform/
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*
+terraform/**/.terraform.lock.hcl
+terraform/**/crash.log
+terraform/**/crash.*.log
+
+# Kube
+*.kubeconfig
+kubeconfig*
+**/kubeconfig*
+
+# Env / secrets
+.env
+.env.*
+**/*.pem
+**/*.key
+**/*secret*
+**/*password*
+
+# Build
+**/target/
+
+# IDE
+*.code-workspace
+
+# Mac
+.DS_Store
