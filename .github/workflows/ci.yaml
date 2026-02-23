@@ -87,7 +87,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: app
-          file: spring-petclinic-vets-service/Dockerfile
+          file: app/spring-petclinic-vets-service/Dockerfile
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}
