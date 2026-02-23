@@ -86,8 +86,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: app/spring-petclinic-vets-service
-          file: app/spring-petclinic-vets-service/Dockerfile
+          context: app
+          file: spring-petclinic-vets-service/Dockerfile
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}
