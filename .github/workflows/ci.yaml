@@ -1,4 +1,4 @@
-# .github/workflows/vets-service-ci.yml
+# .github/workflows/ci.yaml
 name: vets-service-ci
 
 on:
@@ -7,13 +7,13 @@ on:
     paths:
       - "app/**"
       - "kubernetes/vets-service/**"
-      - ".github/workflows/vets-service-ci.yml"
+      - ".github/workflows/ci.yaml"
   push:
     branches: [ main ]
     paths:
       - "app/**"
       - "kubernetes/vets-service/**"
-      - ".github/workflows/vets-service-ci.yml"
+      - ".github/workflows/ci.yaml"
 
 permissions:
   contents: write
@@ -96,7 +96,7 @@ jobs:
   updatek8s:
     runs-on: ubuntu-latest
     needs: [docker]
-    if: github.ref == 'refs/heads/main'
+    if: needs.docker.result == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -113,6 +113,7 @@ jobs:
           sed -i "s|image: .*vets-service:.*|image: ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}|g" "$FILE"
 
       - name: Commit and push changes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config --global user.email "teju.654@gmail.com"
           git config --global user.name "tejupagudala"
