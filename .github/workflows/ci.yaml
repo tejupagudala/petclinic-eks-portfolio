@@ -96,6 +96,7 @@ jobs:
   updatek8s:
     runs-on: ubuntu-latest
     needs: [build, docker, code-quality]
+    # Intentionally run only on push (not pull_request) to avoid write attempts from PR contexts.
     if: needs.docker.result == 'success' && github.event_name == 'push'
     steps:
       - name: Checkout code
