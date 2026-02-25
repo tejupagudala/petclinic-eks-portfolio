@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: vets-service
-          image: tejupagudala/vets-service:22375393861
+          image: tejupagudala/vets-service:22375909961
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
