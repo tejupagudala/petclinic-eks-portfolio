@@ -1,0 +1,109 @@
+name: cost-report-daily
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # ~8 AM America/Chicago (CDT)
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  daily-cost:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build daily cost report and detect risk
+        id: report
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          YDAY=$(date -u -d "yesterday" +%Y-%m-%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          LIMIT="${{ secrets.DAILY_COST_LIMIT_USD }}"
+
+          aws ce get-cost-and-usage \
+            --time-period Start=$YDAY,End=$TODAY \
+            --granularity DAILY \
+            --metrics UnblendedCost \
+            --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+            --group-by Type=DIMENSION,Key=SERVICE \
+            --output json > by-service.json
+
+          aws ce get-cost-and-usage \
+            --time-period Start=$YDAY,End=$TODAY \
+            --granularity DAILY \
+            --metrics UnblendedCost \
+            --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+            --group-by Type=DIMENSION,Key=USAGE_TYPE \
+            --output json > by-usage-type.json
+
+          TOTAL=$(jq -r '[.ResultsByTime[0].Groups[].Metrics.UnblendedCost.Amount|tonumber] | add // 0' by-service.json)
+
+          jq -r '.ResultsByTime[0].Groups
+            | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
+            | sort_by(.v) | reverse
+            | .[] | "\(.k): $\(.v)"' by-service.json > service-lines.txt
+
+          jq -r '.ResultsByTime[0].Groups
+            | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
+            | sort_by(.v) | reverse
+            | .[] | "\(.k): $\(.v)"' by-usage-type.json > usage-lines.txt
+
+          jq -r '.ResultsByTime[0].Groups[]
+            | select(.Keys[0] | test("extendedSupport|NatGateway-Hours|LoadBalancerUsage"; "i"))
+            | "\(.Keys[0]): $\(.Metrics.UnblendedCost.Amount)"' by-usage-type.json > risky-lines.txt || true
+
+          ALERT=0
+          awk -v t="$TOTAL" -v l="$LIMIT" 'BEGIN{exit !(t>l)}' && ALERT=1 || true
+          [ -s risky-lines.txt ] && ALERT=1 || true
+
+          {
+            echo "AWS Daily Cost Report"
+            echo "Date (UTC): $YDAY"
+            echo "Total Usage: \$$TOTAL"
+            echo "Daily Limit: \$$LIMIT"
+            echo
+            echo "By Service"
+            cat service-lines.txt
+            echo
+            echo "By Usage Type"
+            cat usage-lines.txt
+            echo
+            echo "Risk Flags"
+            if [ -s risky-lines.txt ]; then cat risky-lines.txt; else echo "None"; fi
+            echo
+            echo "Alert Triggered: $ALERT"
+          } > cost-report.txt
+
+          echo "alert=$ALERT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-report-daily
+          path: |
+            cost-report.txt
+            by-service.json
+            by-usage-type.json
+            risky-lines.txt
+
+      - name: Email report (SNS -> Gmail)
+        run: |
+          aws sns publish \
+            --topic-arn "${{ secrets.COST_ALERT_SNS_TOPIC_ARN }}" \
+            --subject "AWS Daily Cost Report" \
+            --message file://cost-report.txt
+
+      - name: Fail workflow if risk detected
+        if: steps.report.outputs.alert == '1'
+        run: |
+          echo "Cost/risk threshold hit. Check artifact + email."
+          exit 1
