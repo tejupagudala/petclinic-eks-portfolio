@@ -46,20 +46,24 @@ jobs:
             --output json > by-usage-type.json
 
           TOTAL=$(jq -r '[.ResultsByTime[0].Groups[].Metrics.UnblendedCost.Amount|tonumber] | add // 0' by-service.json)
+          TOTAL_FMT=$(awk -v t="$TOTAL" 'BEGIN{printf "%.6f", t}')
 
           jq -r '.ResultsByTime[0].Groups
-            | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
-            | sort_by(.v) | reverse
-            | .[] | "\(.k): $\(.v)"' by-service.json > service-lines.txt
+           | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
+           | sort_by(.v) | reverse
+           | .[] | "\(.k): $" + (if .v < 0.01 then (.v|@sprintf("%.8f")) else (.v|@sprintf("%.4f")) end)' by-service.json > service-lines.txt
 
           jq -r '.ResultsByTime[0].Groups
-            | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
-            | sort_by(.v) | reverse
-            | .[] | "\(.k): $\(.v)"' by-usage-type.json > usage-lines.txt
+           | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
+           | sort_by(.v) | reverse
+           | .[] | "\(.k): $" + (if .v < 0.01 then (.v|@sprintf("%.8f")) else (.v|@sprintf("%.4f")) end)' by-usage-type.json > usage-lines.txt
 
-          jq -r '.ResultsByTime[0].Groups[]
-            | select(.Keys[0] | test("extendedSupport|NatGateway-Hours|LoadBalancerUsage"; "i"))
-            | "\(.Keys[0]): $\(.Metrics.UnblendedCost.Amount)"' by-usage-type.json > risky-lines.txt || true
+
+          jq -r '.ResultsByTime[0].Groups
+           | map({k:.Keys[0],v:(.Metrics.UnblendedCost.Amount|tonumber)})
+           | map(select(.k | test("extendedSupport|NatGateway-Hours|LoadBalancerUsage"; "i")))
+           | .[] | "\(.k): $" + (if .v < 0.01 then (.v|@sprintf("%.8f")) else (.v|@sprintf("%.4f")) end)' by-usage-type.json > risky-lines.txt || true
+
 
           ALERT=0
           awk -v t="$TOTAL" -v l="$LIMIT" 'BEGIN{exit !(t>l)}' && ALERT=1 || true
@@ -68,7 +72,7 @@ jobs:
           {
             echo "AWS Daily Cost Report"
             echo "Date (UTC): $YDAY"
-            echo "Total Usage: \$$TOTAL"
+            echo "Total Usage: \$$TOTAL_FMT"
             echo "Daily Limit: \$$LIMIT"
             echo
             echo "By Service"
