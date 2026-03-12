@@ -1,0 +1,40 @@
+name: nonprod-stop
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  stop-nodegroup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run only at 11 PM America/Chicago
+        run: |
+          HOUR=$(TZ=America/Chicago date +%H)
+          if [ "$HOUR" != "23" ]; then
+            echo "Not 11 PM Chicago; exiting."
+            exit 0
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Scale nodegroup down to zero
+        run: |
+          aws eks update-nodegroup-config \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}" \
+            --scaling-config minSize=0,maxSize=2,desiredSize=0
+
+          aws eks wait nodegroup-active \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}"
