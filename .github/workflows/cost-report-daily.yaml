@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials (OIDC)
+        id: creds
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -90,6 +92,7 @@ jobs:
           echo "alert=$ALERT" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
+        if: steps.creds.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: cost-report-daily
@@ -100,6 +103,7 @@ jobs:
             risky-lines.txt
 
       - name: Email report (SNS -> Gmail)
+        if: steps.creds.outcome == 'success'
         run: |
           aws sns publish \
             --topic-arn "${{ secrets.COST_ALERT_SNS_TOPIC_ARN }}" \
@@ -107,7 +111,7 @@ jobs:
             --message file://cost-report.txt
 
       - name: Fail workflow if risk detected
-        if: steps.report.outputs.alert == '1'
+        if: steps.creds.outcome == 'success' && steps.report.outputs.alert == '1'
         run: |
           echo "Cost/risk threshold hit. Check artifact + email."
           exit 1
