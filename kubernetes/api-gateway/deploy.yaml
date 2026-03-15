@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: tejupagudala/api-gateway:v3
+          image: tejupagudala/api-gateway:23102312513
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
