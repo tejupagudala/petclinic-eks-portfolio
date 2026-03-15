@@ -16,7 +16,6 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>spring-petclinic-admin-server</module>
         <module>spring-petclinic-customers-service</module>
         <module>spring-petclinic-vets-service</module>
         <module>spring-petclinic-visits-service</module>
@@ -32,7 +31,6 @@
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <chaos-monkey-spring-boot.version>3.1.0</chaos-monkey-spring-boot.version>
         <jolokia-core.version>1.7.1</jolokia-core.version>
-        <datasource-micrometer.version>2.0.1</datasource-micrometer.version>
 
         <docker.image.prefix>springcommunity</docker.image.prefix>
         <docker.image.exposed.port>9090</docker.image.exposed.port>
@@ -66,11 +64,6 @@
                 <artifactId>jolokia-core</artifactId>
                 <version>${jolokia-core.version}</version>
             </dependency>
-            <dependency>
-                <groupId>net.ttddyy.observation</groupId>
-                <artifactId>datasource-micrometer-spring-boot</artifactId>
-                <version>${datasource-micrometer.version}</version>
-            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -90,7 +83,6 @@
                         <artifactId>spring-boot-maven-plugin</artifactId>
                         <executions>
                             <execution>
-                                <!-- Spring Boot Actuator displays build-related information if a META-INF/build-info.properties file is present -->
                                 <goals>
                                     <goal>build-info</goal>
                                 </goals>
@@ -105,7 +97,6 @@
                         </executions>
                     </plugin>
 
-                    <!-- Spring Boot Actuator displays build-related information if a META-INF/build-info.properties file is present -->
                     <plugin>
                         <groupId>io.github.git-commit-id</groupId>
                         <artifactId>git-commit-id-maven-plugin</artifactId>

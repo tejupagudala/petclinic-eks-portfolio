@@ -13,6 +13,7 @@ resource "aws_iam_role" "eks_cluster_role" {
       }
     ]
   })
+  tags = var.tags
 }
 
 
@@ -25,6 +26,8 @@ resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
   version  = var.cluster_version
+
+  tags = var.tags
 
   vpc_config {
     subnet_ids = var.subnet_ids
@@ -50,6 +53,7 @@ resource "aws_iam_role" "eks_node_group_role" {
       }
     ]
   })
+  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "eks_node_group_role_attachment" {
@@ -61,6 +65,7 @@ resource "aws_iam_role_policy_attachment" "eks_node_group_role_attachment" {
 
   role       = aws_iam_role.eks_node_group_role.name
   policy_arn = each.value
+  
 }
 
 resource "aws_eks_node_group" "node_groups" {
@@ -79,6 +84,8 @@ resource "aws_eks_node_group" "node_groups" {
 
   instance_types = each.value.instance_types
   capacity_type  = each.value.capacity_type
+
+  tags = var.tags
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_node_group_role_attachment,

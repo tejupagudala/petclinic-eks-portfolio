@@ -2,6 +2,73 @@
 
 End-to-end runbook to bring the project up from scratch, verify CI/CD, and shut it down to save cost.
 
+Quick docs index:
+
+- Full build tutorial (infra + app + observability): [TUTORIAL_FROM_SCRATCH.md](/Users/sai/petclinic-eks-portfolio-1/TUTORIAL_FROM_SCRATCH.md)
+- Kubernetes observability runbook: [kubernetes/monitoring/README.md](/Users/sai/petclinic-eks-portfolio-1/kubernetes/monitoring/README.md)
+- Local Docker observability runbook: [app/docker/OBSERVABILITY.md](/Users/sai/petclinic-eks-portfolio-1/app/docker/OBSERVABILITY.md)
+
+## 0) Observability Tutorial Overview
+
+This repo supports two observability paths:
+
+1. Local Docker observability (fast learning loop)
+2. Kubernetes observability on EKS (production-style stack)
+
+### 0.1 DevOps tools/services used
+
+- Docker / Docker Compose
+- Prometheus
+- Grafana
+- Spring Boot Actuator + Micrometer
+- Kubernetes + EKS
+- Prometheus Operator (`kube-prometheus-stack`)
+- ServiceMonitor CRDs
+- Terraform (infra provisioning)
+
+### 0.2 Architecture and workflow (high level)
+
+Docker path:
+
+- Spring services expose `/actuator/prometheus`
+- Prometheus (docker) scrapes service endpoints using `app/docker/prometheus/prometheus.yml`
+- Grafana (docker) reads from Prometheus and visualizes app metrics
+
+Kubernetes path:
+
+- `kube-prometheus-stack` provides Prometheus, Grafana, node-exporter, kube-state-metrics
+- `ServiceMonitor` resources discover/scrape app endpoints in namespace `petclinic`
+- Prometheus stores metrics; Grafana dashboards visualize infra/k8s/app metrics
+
+### 0.3 Project files added/used for observability
+
+Docker observability files:
+
+- `app/docker/prometheus/prometheus.yml`: scrape jobs for app services
+- `app/docker/prometheus/Dockerfile`: custom Prometheus image with config
+- `app/docker/grafana/provisioning.yml`: Grafana datasource setup
+- `app/docker/grafana/Dockerfile`: custom Grafana image with provisioning
+- `app/docker-compose.yml`: runs Prometheus + Grafana + app services
+
+Kubernetes observability files:
+
+- `kubernetes/monitoring/petclinic-servicemonitor.yml`: ServiceMonitor definitions for `api-gateway`, `customers`, `visits`, `vets`
+- `kubernetes/monitoring/README.md`: full Kubernetes observability execution and troubleshooting guide
+
+### 0.4 Recommended implementation order
+
+1. Bring app up and confirm services are healthy.
+2. Validate app metrics endpoints (`/actuator/prometheus`).
+3. Enable Prometheus scraping:
+   - Docker: scrape config in `app/docker/prometheus/prometheus.yml`
+   - Kubernetes: apply `kubernetes/monitoring/petclinic-servicemonitor.yml`
+4. Open Prometheus UI and validate `up` and core metrics.
+5. Open Grafana and create grouped dashboards:
+   - `Application`
+   - `Kubernetes`
+   - `Infrastructure`
+6. Generate traffic and verify request/latency/memory charts move.
+
 ## 1) Prerequisites
 
 Install these tools locally:
@@ -156,7 +223,6 @@ kubectl apply -f kubernetes/config-server/
 kubectl apply -f kubernetes/customers-service/
 kubectl apply -f kubernetes/vets-service/
 kubectl apply -f kubernetes/visits-service/
-kubectl apply -f kubernetes/admin-server/
 kubectl apply -f kubernetes/api-gateway/
 ```
 
@@ -319,6 +385,31 @@ kubectl -n kube-system logs deploy/aws-load-balancer-controller --tail=200
 kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 50
 ```
 
+### If `customers/visits/vets` crash with `Unable to load config data from 'configserver:http://config-server:8888'`
+
+Cause:
+- `SPRING_CLOUD_CONFIG_ENABLED=false` disables the Spring Cloud Config resolver, so `configserver:` imports fail at startup.
+
+Fix:
+
+```bash
+kubectl -n petclinic set env deploy/customers-service SPRING_CLOUD_CONFIG_ENABLED=true
+kubectl -n petclinic set env deploy/visits-service SPRING_CLOUD_CONFIG_ENABLED=true
+kubectl -n petclinic set env deploy/vets-service SPRING_CLOUD_CONFIG_ENABLED=true
+
+kubectl -n petclinic rollout restart deploy/customers-service deploy/visits-service deploy/vets-service
+kubectl -n petclinic rollout status deploy/customers-service
+kubectl -n petclinic rollout status deploy/visits-service
+kubectl -n petclinic rollout status deploy/vets-service
+```
+
+Verify:
+
+```bash
+kubectl -n petclinic get pods -o wide
+kubectl -n petclinic logs deploy/visits-service --tail=100
+```
+
 ## 12) Portfolio completion checklist
 
 Use this checklist before marking the project complete:
@@ -345,3 +436,147 @@ Expected after destroy:
 
 - `terraform state list` returns no resources.
 - `aws eks describe-cluster --name demo-eks-cluster --region us-east-1 --profile myaccount` fails with `ResourceNotFoundException`.
+
+## 13) Kubernetes observability runbook (from scratch)
+
+Full step-by-step guide (infra metrics, container metrics, application metrics, validation, and troubleshooting):
+
+- [kubernetes/monitoring/README.md](/Users/sai/petclinic-eks-portfolio-1/kubernetes/monitoring/README.md)
+
+Local Docker observability runbook (Prometheus + Grafana under `app/docker`):
+
+- [app/docker/OBSERVABILITY.md](/Users/sai/petclinic-eks-portfolio-1/app/docker/OBSERVABILITY.md)
+
+Quick summary:
+
+1. Install/verify `kube-prometheus-stack` in namespace `monitoring`.
+2. Ensure application pods expose `/actuator/prometheus`.
+3. Apply ServiceMonitors from:
+   - `kubernetes/monitoring/petclinic-servicemonitor.yml`
+4. Port-forward:
+   - Prometheus: `9090`
+   - Grafana: `3000` (or `3001` if `3000` is busy)
+5. Validate three categories:
+   - Infrastructure: `node_*`
+   - Kubernetes state: `kube_*`
+   - Application: `http_server_requests_seconds_*`, `jvm_*`, `process_*`
+
+## 14) Issues we hit and the exact fixes
+
+### 14.1 App pods crash (`ConfigClientFailFastException` / `Unable to load config data from 'configserver:http://config-server:8888'`)
+
+Symptoms:
+
+- `customers-service`, `visits-service`, `vets-service` in `CrashLoopBackOff`
+- logs show config import/load failures
+
+Root causes:
+
+- `SPRING_CLOUD_CONFIG_ENABLED=false` was present in runtime env for app services.
+- In-cluster config server resolution needed stable service DNS.
+
+Fix:
+
+- Keep these env vars in the three app deployments:
+  - `SPRING_CONFIG_IMPORT=optional:configserver:http://config-server.petclinic.svc.cluster.local:8888/`
+  - `SPRING_CLOUD_CONFIG_ENABLED=true`
+  - `SPRING_CLOUD_CONFIG_URI=http://config-server.petclinic.svc.cluster.local:8888`
+
+Apply + restart:
+
+```bash
+kubectl apply -f kubernetes/customers-service/deploy.yaml
+kubectl apply -f kubernetes/visits-service/deploy.yaml
+kubectl apply -f kubernetes/vets-service/deployment.yaml
+kubectl -n petclinic rollout restart deploy/customers-service deploy/visits-service deploy/vets-service
+kubectl -n petclinic rollout status deploy/customers-service
+kubectl -n petclinic rollout status deploy/visits-service
+kubectl -n petclinic rollout status deploy/vets-service
+```
+
+Why required:
+
+- Config client must be enabled to resolve `configserver:` imports.
+
+If skipped:
+
+- services fail startup and application metrics never appear.
+
+### 14.2 Ingress does not get ADDRESS (ALB not created) and events show `sts:AssumeRoleWithWebIdentity` `403`
+
+Symptoms:
+
+- `kubectl get ingress -n petclinic` shows empty `ADDRESS`
+- ingress events show `AccessDenied` for `AssumeRoleWithWebIdentity`
+
+Root cause:
+
+- ALB controller IRSA role trust policy or service-account annotation mismatch.
+
+Fix checklist:
+
+```bash
+kubectl -n kube-system get sa aws-load-balancer-controller -o yaml
+kubectl -n kube-system rollout status deploy/aws-load-balancer-controller
+kubectl -n kube-system logs deploy/aws-load-balancer-controller --tail=200
+```
+
+Then ensure:
+
+- ServiceAccount exists in `kube-system`
+- It has annotation:
+  - `eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/AmazonEKSLoadBalancerControllerRole`
+- IAM role trust policy allows:
+  - `system:serviceaccount:kube-system:aws-load-balancer-controller`
+  - cluster OIDC provider
+
+Force reconcile ingress:
+
+```bash
+kubectl -n petclinic delete ingress frontend-proxyr --ignore-not-found
+kubectl apply -f kubernetes/api-gateway/ingress.yaml
+kubectl -n petclinic get ingress frontend-proxyr -w
+```
+
+Why required:
+
+- ALB controller needs valid web-identity credentials to create ALB resources.
+
+If skipped:
+
+- no ALB, no external endpoint, and no browser access.
+
+### 14.3 DNS confusion even after ingress has ADDRESS
+
+Symptoms:
+
+- `curl` to ALB hostname fails to resolve from local machine.
+
+Fix:
+
+```bash
+ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+nslookup "$ALB"
+```
+
+- Use returned IP in `/etc/hosts` for `petclinic.local`.
+- If multiple IPs exist, map a working one and retest.
+
+Why required:
+
+- local hostname resolution is outside Kubernetes and depends on local DNS/hosts.
+
+If skipped:
+
+- cluster is healthy but `petclinic.local` still fails locally.
+
+### 14.4 Root URL vs API URL confusion
+
+Use these for backend validation:
+
+```bash
+curl -i http://petclinic.local/api/customer/owners
+curl -i http://petclinic.local/api/vet/vets
+```
+
+If root path behavior differs across runs/images, validate app reachability using `/api/*` routes first.

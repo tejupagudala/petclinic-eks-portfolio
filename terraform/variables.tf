@@ -44,8 +44,85 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.30"
+  default     = "1.32"
 }
+
+# GitHub OIDC + repo metadata
+variable "github_org" {
+  description = "GitHub repository name"
+  type        = string
+
+}
+
+variable "github_repo" {
+  description = "GitHub repository name"
+  type        = string
+  default     = "petclinic-eks-portfolio-1"
+}
+
+variable "github_branch" {
+  description = "Branch allowed to assume GitHub OIDC role"
+  type        = string
+  default     = "main"
+}
+
+# Optional: if OIDC provider already exists in account, pass its ARN
+variable "github_oidc_provider_arn" {
+  description = "Existing GitHub OIDC provider ARN (optional)"
+  type        = string
+  default     = ""
+}
+
+# Gmail alert destination
+variable "alert_email" {
+  description = "Email to receive budget/anomaly/daily cost alerts"
+  type        = string
+}
+
+# Budget limits
+variable "monthly_budget_limit_usd" {
+  type    = string
+  default = "20"
+}
+
+variable "eks_budget_limit_usd" {
+  type    = string
+  default = "10"
+}
+
+variable "ec2_other_budget_limit_usd" {
+  type    = string
+  default = "5"
+}
+
+variable "vpc_budget_limit_usd" {
+  type    = string
+  default = "5"
+}
+
+variable "elb_budget_limit_usd" {
+  type    = string
+  default = "5"
+}
+
+# Mandatory cost tags
+variable "default_tags" {
+  description = "Mandatory tags for all Terraform-managed resources"
+  type        = map(string)
+  default = {
+    project     = "petclinic"
+    environment = "portfolio"
+    owner       = "sai"
+    managed_by  = "terraform"
+  }
+}
+
+variable "existing_anomaly_monitor_arn" {
+  description = "Existing Cost Anomaly Monitor ARN to reuse"
+  type        = string
+  default     = ""
+}
+
 
 variable "node_groups" {
   description = "EKS node group configuration"
@@ -60,11 +137,11 @@ variable "node_groups" {
   }))
   default = {
     "demo-node-group" = {
-      instance_types = ["c7i-flex.large"]
+      instance_types = ["t3.small"]
       capacity_type  = "SPOT"
       scaling_config = {
-        desired_size = 2
-        max_size     = 4
+        desired_size = 1
+        max_size     = 1
         min_size     = 1
       }
     }

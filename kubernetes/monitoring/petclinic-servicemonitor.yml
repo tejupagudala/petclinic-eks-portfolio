@@ -1,0 +1,75 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-gateway-sm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["petclinic"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  jobLabel: app.kubernetes.io/name
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: customers-service-sm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["petclinic"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: customers-service
+  jobLabel: app.kubernetes.io/name
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: visits-service-sm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["petclinic"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: visits-service
+  jobLabel: app.kubernetes.io/name
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vets-service-sm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["petclinic"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vets-service
+  jobLabel: app.kubernetes.io/name
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s

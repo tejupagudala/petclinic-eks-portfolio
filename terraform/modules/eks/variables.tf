@@ -18,6 +18,12 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "tags" {
+  description = "Common tags"
+  type        = map(string)
+  default     = {}
+}
+
 variable "node_groups" {
   description = "EKS node group configuration"
   type = map(object({

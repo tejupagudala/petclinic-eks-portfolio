@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customers-service-config
+  namespace: petclinic
+data:
+  application.yml: |
+    spring:
+      application:
+        name: customers-service
+      profiles:
+        active: k8s
+      cloud:
+        config:
+          enabled: false
+          import-check:
+            enabled: false
+      datasource:
+        url: jdbc:mysql://mysql.petclinic.svc.cluster.local:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+        username: ${DB_USERNAME}
+        password: ${DB_PASSWORD}
+        driver-class-name: com.mysql.cj.jdbc.Driver
+      sql:
+        init:
+          mode: always
+          schema-locations: classpath:/db/mysql/schema.sql
+          data-locations: classpath:/db/mysql/data.sql
+      jpa:
+        defer-datasource-initialization: false
+        hibernate:
+          ddl-auto: none
+
+    server:
+      port: 8081
+
+    eureka:
+      client:
+        enabled: false
+
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,prometheus

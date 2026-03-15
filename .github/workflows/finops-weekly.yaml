@@ -1,0 +1,73 @@
+# name: finops-weekly
+
+# on:
+#   schedule:
+#     - cron: "30 13 * * 1"
+#     - cron: "30 14 * * 1"
+#   workflow_dispatch:
+
+# permissions:
+#   id-token: write
+#   contents: read
+
+# jobs:
+#   weekly-review:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Run only at 8:30 AM Monday America/Chicago
+#         run: |
+#           HOUR=$(TZ=America/Chicago date +%H)
+#           DOW=$(TZ=America/Chicago date +%u)
+#           if [ "$HOUR" != "08" ] || [ "$DOW" != "1" ]; then
+#             echo "Not Monday 8:30 AM Chicago; exiting."
+#             exit 0
+#           fi
+
+#       - name: Configure AWS credentials (OIDC)
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+#           aws-region: ${{ secrets.AWS_REGION }}
+
+#       - name: Build weekly report
+#         run: |
+#           START=$(date -u -d "7 days ago" +%Y-%m-%d)
+#           END=$(date -u +%Y-%m-%d)
+
+#           aws ce get-cost-and-usage \
+#             --time-period Start=$START,End=$END \
+#             --granularity DAILY \
+#             --metrics UnblendedCost \
+#             --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+#             --group-by Type=DIMENSION,Key=SERVICE \
+#             --output json > weekly-by-service.json
+
+#           {
+#             echo "AWS Weekly FinOps Review"
+#             echo "Range (UTC): $START to $END"
+#             echo
+#             echo "Top Services (sum over 7 days):"
+#             jq -r '
+#               [.ResultsByTime[].Groups[]]
+#               | group_by(.Keys[0])
+#               | map({k: .[0].Keys[0], v: (map(.Metrics.UnblendedCost.Amount|tonumber) | add)})
+#               | sort_by(.v) | reverse
+#               | .[] | "\(.k): $\(.v)"' weekly-by-service.json
+#           } > finops-weekly.txt
+
+#           cat finops-weekly.txt
+
+#       - name: Upload weekly artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: finops-weekly
+#           path: |
+#             finops-weekly.txt
+#             weekly-by-service.json
+
+#       - name: Email weekly report via SNS->Gmail
+#         run: |
+#           aws sns publish \
+#             --topic-arn "${{ secrets.COST_ALERT_SNS_TOPIC_ARN }}" \
+#             --subject "AWS Weekly FinOps Review" \
+#             --message file://finops-weekly.txt

@@ -20,6 +20,10 @@ terraform {
 provider "aws" {
   region  = var.region
   profile = var.profile_name
+
+  default_tags {
+    tags = var.default_tags
+  }
 }
 
 module "vpc" {
@@ -33,6 +37,7 @@ module "vpc" {
 }
 
 module "eks" {
+  tags   = var.default_tags
   source = "./modules/eks"
 
   cluster_name    = var.cluster_name

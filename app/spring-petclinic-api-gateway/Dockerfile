@@ -15,7 +15,7 @@ COPY spring-petclinic-discovery-server/pom.xml spring-petclinic-discovery-server
 COPY spring-petclinic-genai-service/pom.xml spring-petclinic-genai-service/pom.xml
 COPY spring-petclinic-vets-service/pom.xml spring-petclinic-vets-service/pom.xml
 COPY spring-petclinic-visits-service/pom.xml spring-petclinic-visits-service/pom.xml
-COPY spring-petclinic-visits-service/pom.xml spring-petclinic-api-gateway/pom.xml
+COPY spring-petclinic-api-gateway/pom.xml spring-petclinic-api-gateway/pom.xml
 
 # (Optional but recommended) download dependencies for faster rebuilds
 RUN ./mvnw -q -DskipTests -f spring-petclinic-api-gateway/pom.xml dependency:go-offline

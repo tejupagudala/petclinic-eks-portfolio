@@ -39,3 +39,4 @@ kubeconfig*
 
 # Mac
 .DS_Store
+.env

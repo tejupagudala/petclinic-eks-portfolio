@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: api-gateway
     app.kubernetes.io/part-of: spring-petclinic
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: api-gateway
   ports:
