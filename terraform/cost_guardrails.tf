@@ -1,5 +1,5 @@
-# data "aws_caller_identity" "current" {}
-# data "aws_partition" "current" {}
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 
 
 locals {
@@ -17,8 +17,62 @@ locals {
   }
 }
 
+data "aws_iam_policy_document" "cost_alerts_kms" {
+  statement {
+    sid    = "AllowRootAccountAdmin"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AllowSNSServiceUseKey"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["sns.amazonaws.com"]
+    }
+
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey"
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
+resource "aws_kms_key" "cost_alerts" {
+  description             = "KMS key for cost alert SNS topic encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+  policy                  = data.aws_iam_policy_document.cost_alerts_kms.json
+  tags                    = var.default_tags
+}
+
+resource "aws_kms_alias" "cost_alerts" {
+  name          = "alias/${var.cluster_name}-cost-alerts"
+  target_key_id = aws_kms_key.cost_alerts.key_id
+}
+
 resource "aws_sns_topic" "cost_alerts" {
-  name = "${var.cluster_name}-cost-alerts"
+  name              = "${var.cluster_name}-cost-alerts"
+  kms_master_key_id = aws_kms_key.cost_alerts.arn
 }
 
 resource "aws_sns_topic_subscription" "cost_email" {
@@ -91,10 +145,10 @@ resource "aws_ce_anomaly_subscription" "daily_anomaly" {
   frequency        = "DAILY"
   monitor_arn_list = [local.service_monitor_arn]
   threshold_expression {
-      dimension {
-        key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
-        values        = ["1"]
-        match_options = ["GREATER_THAN_OR_EQUAL"]
+    dimension {
+      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+      values        = ["1"]
+      match_options = ["GREATER_THAN_OR_EQUAL"]
     }
   }
 
@@ -269,5 +323,3 @@ resource "aws_iam_role_policy_attachment" "github_actions_cost_ops" {
 
 #   tags = var.default_tags
 # }
-
-

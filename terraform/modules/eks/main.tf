@@ -22,6 +22,18 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_role_attachment" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
+resource "aws_kms_key" "eks_secrets" {
+  description             = "KMS key for EKS secrets encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+  tags                    = var.tags
+}
+
+resource "aws_kms_alias" "eks_secrets" {
+  name          = "alias/${var.cluster_name}-eks-secrets"
+  target_key_id = aws_kms_key.eks_secrets.key_id
+}
+
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
@@ -30,7 +42,16 @@ resource "aws_eks_cluster" "main" {
   tags = var.tags
 
   vpc_config {
-    subnet_ids = var.subnet_ids
+    subnet_ids              = var.subnet_ids
+    endpoint_private_access = true
+    endpoint_public_access  = false
+  }
+
+  encryption_config {
+    provider {
+      key_arn = aws_kms_key.eks_secrets.arn
+    }
+    resources = ["secrets"]
   }
 
   depends_on = [
@@ -65,7 +86,7 @@ resource "aws_iam_role_policy_attachment" "eks_node_group_role_attachment" {
 
   role       = aws_iam_role.eks_node_group_role.name
   policy_arn = each.value
-  
+
 }
 
 resource "aws_eks_node_group" "node_groups" {

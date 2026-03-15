@@ -89,7 +89,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.24.0
         with:
           scan-type: fs
-          scan-ref: app/spring-petclinic-api-gateway
+          scan-ref: app/
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           format: table
