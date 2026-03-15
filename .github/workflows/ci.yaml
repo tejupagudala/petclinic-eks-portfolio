@@ -61,6 +61,12 @@ jobs:
           java-version: "17"
           cache: maven
 
+      - name: Verify JaCoCo report exists
+        run: |
+          cd app
+          ls -l spring-petclinic-api-gateway/target/site/jacoco/jacoco.xml
+
+
       - name: SonarQube/SonarCloud Static Code Analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -70,6 +76,7 @@ jobs:
         run: |
           cd app
           ./mvnw -pl spring-petclinic-api-gateway -am verify sonar:sonar \
+            -Dsonar.coverage.jacoco.xmlReportPaths=spring-petclinic-api-gateway/target/site/jacoco/jacoco.xml \
             -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
             -Dsonar.organization="$SONAR_ORG" \
             -Dsonar.host.url="$SONAR_HOST_URL" \
