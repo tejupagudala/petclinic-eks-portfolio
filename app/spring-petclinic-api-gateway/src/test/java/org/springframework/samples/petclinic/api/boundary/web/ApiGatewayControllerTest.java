@@ -94,4 +94,16 @@ class ApiGatewayControllerTest {
             .jsonPath("$.pets[0].visits").isEmpty();
     }
 
+    @Test
+    void getOwnerDetails_withCustomersServiceError() {
+        Mockito
+            .when(customersServiceClient.getOwner(1))
+            .thenReturn(Mono.error(new RuntimeException("customers unavailable")));
+
+        client.get()
+            .uri("/api/gateway/owners/1")
+            .exchange()
+            .expectStatus().is5xxServerError();
+    }
+
 }
