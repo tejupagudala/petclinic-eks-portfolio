@@ -61,11 +61,6 @@ jobs:
           java-version: "17"
           cache: maven
 
-      - name: Verify JaCoCo report exists
-        run: |
-          cd app
-          ls -l spring-petclinic-api-gateway/target/site/jacoco/jacoco.xml
-
 
       - name: SonarQube/SonarCloud Static Code Analysis
         env:
