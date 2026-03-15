@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class FallbackController {
 
-    @RequestMapping("/fallback")
+    @GetMapping("/fallback")
     public ResponseEntity<String> fallback() {
         return ResponseEntity.status(HttpStatus.SC_SERVICE_UNAVAILABLE)
                 .body("Chat is currently unavailable. Please try again later.");
