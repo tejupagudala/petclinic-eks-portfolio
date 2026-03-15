@@ -215,14 +215,11 @@ resource "aws_iam_role" "github_actions_cost_ops" {
 
 data "aws_iam_policy_document" "github_actions_cost_ops" {
   # trivy:ignore:AVD-AWS-0057
-  # Cost Explorer APIs in this set do not support resource-level permissions and require "*".
+  # Cost Explorer API used by the daily report does not support resource-level permissions and requires "*".
   statement {
     sid = "CostExplorerRead"
     actions = [
-      "ce:GetCostAndUsage",
-      "ce:GetCostForecast",
-      "ce:GetAnomalies",
-      "ce:GetDimensionValues"
+      "ce:GetCostAndUsage"
     ]
     resources = ["*"]
   }
