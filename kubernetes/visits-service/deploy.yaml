@@ -25,6 +25,13 @@ spec:
       initContainers:
         - name: wait-for-mysql
           image: busybox:1.36
+          securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
           command:
             - sh
             - -c
@@ -38,6 +45,13 @@ spec:
             
         - name: wait-for-customers
           image: curlimages/curl:8.10.1
+          securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
           command:
             - sh
             - -c
