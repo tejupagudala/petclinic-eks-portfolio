@@ -7,12 +7,14 @@ on:
     paths:
       - "app/**"
       - "kubernetes/api-gateway/**"
+      - "terraform/**"
       - ".github/workflows/ci.yaml"
   push:
     branches: [ main, githubcicheck ]
     paths:
       - "app/**"
       - "kubernetes/api-gateway/**"
+      - "terraform/**"
       - ".github/workflows/ci.yaml"
 
 permissions:
