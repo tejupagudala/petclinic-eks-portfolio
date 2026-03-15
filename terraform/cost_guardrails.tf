@@ -15,6 +15,19 @@ locals {
     vpc       = { service = "Amazon Virtual Private Cloud", limit = var.vpc_budget_limit_usd }
     elb       = { service = "Amazon Elastic Load Balancing", limit = var.elb_budget_limit_usd }
   }
+
+  budget_arns = concat(
+    [
+      "arn:${data.aws_partition.current.partition}:budgets::${data.aws_caller_identity.current.account_id}:budget/${var.cluster_name}-monthly-total"
+    ],
+    [
+      for budget_name, _ in local.service_budgets :
+      "arn:${data.aws_partition.current.partition}:budgets::${data.aws_caller_identity.current.account_id}:budget/${var.cluster_name}-${budget_name}-monthly"
+    ]
+  )
+
+  eks_cluster_arn           = "arn:${data.aws_partition.current.partition}:eks:${var.region}:${data.aws_caller_identity.current.account_id}:cluster/${var.cluster_name}"
+  eks_nodegroup_arn_pattern = "arn:${data.aws_partition.current.partition}:eks:${var.region}:${data.aws_caller_identity.current.account_id}:nodegroup/${var.cluster_name}/*/*"
 }
 
 data "aws_iam_policy_document" "cost_alerts_kms" {
@@ -201,6 +214,8 @@ resource "aws_iam_role" "github_actions_cost_ops" {
 }
 
 data "aws_iam_policy_document" "github_actions_cost_ops" {
+  # trivy:ignore:AVD-AWS-0057
+  # Cost Explorer APIs in this set do not support resource-level permissions and require "*".
   statement {
     sid = "CostExplorerRead"
     actions = [
@@ -216,9 +231,16 @@ data "aws_iam_policy_document" "github_actions_cost_ops" {
     sid = "BudgetsRead"
     actions = [
       "budgets:ViewBudget",
-      "budgets:Describe*"
+      "budgets:DescribeBudget",
+      "budgets:DescribeBudgetPerformanceHistory",
+      "budgets:DescribeBudgetAction",
+      "budgets:DescribeBudgetActionHistories",
+      "budgets:DescribeBudgetActionsForAccount",
+      "budgets:DescribeBudgetActionsForBudget",
+      "budgets:DescribeBudgetNotificationsForAccount",
+      "budgets:DescribeBudgets"
     ]
-    resources = ["*"]
+    resources = local.budget_arns
   }
 
   statement {
@@ -235,7 +257,10 @@ data "aws_iam_policy_document" "github_actions_cost_ops" {
       "eks:ListNodegroups",
       "eks:UpdateNodegroupConfig"
     ]
-    resources = ["*"]
+    resources = [
+      local.eks_cluster_arn,
+      local.eks_nodegroup_arn_pattern
+    ]
   }
 }
 
