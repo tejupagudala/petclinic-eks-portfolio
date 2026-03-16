@@ -1,0 +1,47 @@
+name: e2e-smoke
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["api-gateway-ci"]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, linux, aws-vpc]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig --name "${{ secrets.EKS_CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}"
+
+      - name: Wait for ingress hostname
+        run: |
+          for i in {1..60}; do
+            ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$ALB" ]; then
+              echo "ALB=$ALB" >> $GITHUB_ENV
+              break
+            fi
+            sleep 10
+          done
+          test -n "${ALB}"
+
+      - name: Smoke API checks
+        run: |
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/customer/owners" >/dev/null
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/vet/vets" >/dev/null
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/visit/owners/1/pets/1/visits" >/dev/null

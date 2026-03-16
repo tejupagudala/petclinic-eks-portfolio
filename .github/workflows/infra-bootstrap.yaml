@@ -1,0 +1,115 @@
+name: infra-bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: [self-hosted, linux, aws-vpc]
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_existing_anomaly_monitor_arn: ${{ vars.EXISTING_ANOMALY_MONITOR_ARN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init/apply
+        run: |
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false
+
+      - name: Install tooling
+        run: |
+          curl -sSL https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz | tar xz
+          sudo mv eksctl /usr/local/bin/
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Configure kubeconfig
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Install AWS Load Balancer Controller
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          POLICY_ARN=$(aws iam list-policies --scope Local \
+            --query "Policies[?PolicyName=='AWSLoadBalancerControllerIAMPolicy'].Arn" --output text)
+
+          if [ -z "$POLICY_ARN" ] || [ "$POLICY_ARN" = "None" ]; then
+            curl -sSL \
+              https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json \
+              -o /tmp/iam_policy.json
+            POLICY_ARN=$(aws iam create-policy \
+              --policy-name AWSLoadBalancerControllerIAMPolicy \
+              --policy-document file:///tmp/iam_policy.json \
+              --query 'Policy.Arn' --output text)
+          fi
+
+          eksctl utils associate-iam-oidc-provider --cluster "$CLUSTER_NAME" --region "$AWS_REGION" --approve
+
+          eksctl create iamserviceaccount \
+            --cluster "$CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --namespace kube-system \
+            --name aws-load-balancer-controller \
+            --role-name "${CLUSTER_NAME}-aws-load-balancer-controller" \
+            --attach-policy-arn "$POLICY_ARN" \
+            --approve \
+            --override-existing-serviceaccounts
+
+          VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            -n kube-system \
+            --set clusterName="$CLUSTER_NAME" \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set region="$AWS_REGION" \
+            --set vpcId="$VPC_ID"
+
+      - name: Install Argo CD
+        run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          helm upgrade --install argocd argo/argo-cd \
+            -n argocd --create-namespace \
+            --set configs.params.server.insecure=true
+
+      - name: Install Prometheus + Grafana
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            -n monitoring --create-namespace
+
+      - name: Apply app monitoring and Argo Applications
+        run: |
+          kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
+          kubectl apply -f kubernetes/argocd/api-gateway-application.yaml
+          kubectl apply -f kubernetes/argocd/vets-service-application.yaml
+
+      - name: Readiness checks
+        run: |
+          kubectl wait --for=condition=Available -n kube-system deployment/aws-load-balancer-controller --timeout=600s
+          kubectl wait --for=condition=Available -n argocd deployment/argocd-server --timeout=600s
+          kubectl get pods -n monitoring
+          kubectl get ingress -n petclinic

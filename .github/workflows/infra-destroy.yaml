@@ -1,0 +1,37 @@
+name: infra-destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DESTROY to continue'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    if: github.event.inputs.confirm == 'DESTROY'
+    runs-on: [self-hosted, linux, aws-vpc]
+    env:
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_existing_anomaly_monitor_arn: ${{ vars.EXISTING_ANOMALY_MONITOR_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Destroy infrastructure
+        run: |
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform destroy -auto-approve -input=false

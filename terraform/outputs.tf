@@ -22,6 +22,16 @@ output "github_actions_role_arn" {
   value = aws_iam_role.github_actions_cost_ops.arn
 }
 
+output "region" {
+  description = "AWS region in use"
+  value       = var.region
+}
+
+output "nodegroup_names" {
+  description = "EKS managed node group names"
+  value       = [for ng in aws_eks_node_group.node_groups : ng.node_group_name]
+}
+
 # output "cur_bucket_name" {
 #   value = aws_s3_bucket.cur.bucket
 # }
