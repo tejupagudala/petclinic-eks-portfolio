@@ -29,7 +29,7 @@ spec:
             name: api-gateway-config
       containers:
         - name: api-gateway
-          image: tejupagudala/api-gateway:23120566699
+          image: tejupagudala/api-gateway:23164672036
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true
