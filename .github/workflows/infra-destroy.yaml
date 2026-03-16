@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type DESTROY to continue'
+        description: "Type DESTROY to continue"
         required: true
         type: string
 
@@ -23,15 +23,30 @@ jobs:
       TF_VAR_existing_anomaly_monitor_arn: ${{ vars.EXISTING_ANOMALY_MONITOR_ARN }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-
       - uses: hashicorp/setup-terraform@v3
-
+        with:
+          terraform_wrapper: false
       - name: Destroy infrastructure
         run: |
           terraform -chdir=terraform init -input=false
           terraform -chdir=terraform destroy -auto-approve -input=false
+
+  stop-runner:
+    if: always() && needs.destroy.result != 'skipped'
+    needs: [destroy]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Stop self-hosted runner EC2
+        run: |
+          aws ec2 stop-instances --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"

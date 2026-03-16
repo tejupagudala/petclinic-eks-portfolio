@@ -8,7 +8,23 @@ permissions:
   contents: read
 
 jobs:
+  start-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Start self-hosted runner EC2
+        run: |
+          aws ec2 start-instances --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
+          aws ec2 wait instance-status-ok --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
+          sleep 45
+
   bootstrap:
+    needs: [start-runner]
     runs-on: [self-hosted, linux, aws-vpc]
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -28,6 +44,8 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Terraform init/apply
         run: |
