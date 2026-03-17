@@ -111,6 +111,16 @@ jobs:
           VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
           helm repo add eks https://aws.github.io/eks-charts
           timeout 120s helm repo update
+
+          STATUS="$(helm -n kube-system status aws-load-balancer-controller 2>/dev/null | awk '/^STATUS:/{print $2}' || true)"
+          if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
+            echo "Found pending Helm release state: $STATUS. Attempting rollback."
+            if helm -n kube-system history aws-load-balancer-controller >/dev/null 2>&1; then
+              helm -n kube-system rollback aws-load-balancer-controller || helm -n kube-system uninstall aws-load-balancer-controller
+            else
+              helm -n kube-system uninstall aws-load-balancer-controller
+            fi
+          fi
           helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
             -n kube-system \
             --set clusterName="$CLUSTER_NAME" \
@@ -118,6 +128,7 @@ jobs:
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="$AWS_REGION" \
             --set vpcId="$VPC_ID" \
+            --atomic \
             --wait \
             --timeout 10m
 
