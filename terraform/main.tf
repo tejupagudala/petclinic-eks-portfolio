@@ -9,10 +9,6 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.3"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
   }
 
   backend "s3" {
@@ -54,48 +50,26 @@ module "eks" {
   node_groups     = var.node_groups
 }
 
-data "aws_eks_cluster" "this" {
-  name = module.eks.cluster_name
-}
+resource "aws_eks_access_entry" "admin_roles" {
+  for_each = toset(var.aws_auth_role_arns)
 
-data "aws_eks_cluster_auth" "this" {
-  name = module.eks.cluster_name
-}
-
-provider "kubernetes" {
-  host                   = data.aws_eks_cluster.this.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.this.token
-}
-
-locals {
-  aws_auth_roles = concat(
-    [
-      {
-        rolearn  = module.eks.node_group_role_arn
-        username = "system:node:{{EC2PrivateDNSName}}"
-        groups   = ["system:bootstrappers", "system:nodes"]
-      }
-    ],
-    [
-      for arn in var.aws_auth_role_arns : {
-        rolearn  = arn
-        username = arn
-        groups   = ["system:masters"]
-      }
-    ]
-  )
-}
-
-resource "kubernetes_config_map_v1" "aws_auth" {
-  metadata {
-    name      = "aws-auth"
-    namespace = "kube-system"
-  }
-
-  data = {
-    mapRoles = yamlencode(local.aws_auth_roles)
-  }
+  cluster_name  = module.eks.cluster_name
+  principal_arn = each.value
+  type          = "STANDARD"
 
   depends_on = [module.eks]
+}
+
+resource "aws_eks_access_policy_association" "admin_roles" {
+  for_each = toset(var.aws_auth_role_arns)
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.admin_roles]
 }
