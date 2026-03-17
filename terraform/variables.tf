@@ -6,9 +6,9 @@ variable "region" {
 }
 
 variable "profile_name" {
-  description = "AWS profile name"
+  description = "AWS profile name for local CLI usage (leave empty in CI/OIDC)"
   type        = string
-  default     = "myaccount"
+  default     = ""
 }
 
 variable "vpc_cidr" {
@@ -123,6 +123,12 @@ variable "existing_anomaly_monitor_arn" {
   default     = ""
 }
 
+variable "enable_cost_anomaly_detection" {
+  description = "Enable Cost Anomaly Detection monitor/subscription resources"
+  type        = bool
+  default     = true
+}
+
 
 variable "node_groups" {
   description = "EKS node group configuration"
@@ -146,4 +152,47 @@ variable "node_groups" {
       }
     }
   }
+}
+
+# Optional: self-hosted GitHub runner EC2 (cost-controlled)
+variable "enable_github_runner" {
+  description = "Whether to create an EC2 instance for GitHub self-hosted runner"
+  type        = bool
+  default     = false
+}
+
+variable "github_runner_instance_type" {
+  description = "EC2 instance type for GitHub runner"
+  type        = string
+  default     = "t3.small"
+}
+
+variable "github_runner_subnet_id" {
+  description = "Subnet ID for GitHub runner instance. If empty, first private subnet is used."
+  type        = string
+  default     = ""
+}
+
+variable "github_runner_ami_id" {
+  description = "AMI ID for GitHub runner instance. If empty, latest Amazon Linux 2023 AMI is used."
+  type        = string
+  default     = ""
+}
+
+variable "github_runner_key_name" {
+  description = "Optional EC2 key pair name for GitHub runner instance"
+  type        = string
+  default     = ""
+}
+
+variable "github_runner_root_volume_size" {
+  description = "Root EBS size (GiB) for GitHub runner instance"
+  type        = number
+  default     = 30
+}
+
+variable "github_runner_allowed_ssh_cidrs" {
+  description = "Optional list of CIDRs allowed to SSH into runner. Keep empty to disable SSH ingress."
+  type        = list(string)
+  default     = []
 }

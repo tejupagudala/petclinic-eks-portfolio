@@ -5,13 +5,16 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3"
+    }
   }
 
   backend "s3" {
     bucket       = "terraform-demo-eks-state-lock-bucket"
     key          = "terraform.lock.tfstate"
     region       = "us-east-1"
-    profile      = "myaccount"
     use_lockfile = true
     encrypt      = true
   }
@@ -19,7 +22,7 @@ terraform {
 
 provider "aws" {
   region  = var.region
-  profile = var.profile_name
+  profile = var.profile_name != "" ? var.profile_name : null
 
   default_tags {
     tags = var.default_tags
