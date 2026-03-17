@@ -113,7 +113,19 @@ jobs:
             --set serviceAccount.create=false \
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="$AWS_REGION" \
-            --set vpcId="$VPC_ID"
+            --set vpcId="$VPC_ID" \
+            --wait \
+            --timeout 10m
+
+      - name: Diagnose AWS Load Balancer Controller install
+        if: failure()
+        run: |
+          echo "=== helm list (kube-system) ==="
+          helm -n kube-system list || true
+          echo "=== helm status aws-load-balancer-controller ==="
+          helm -n kube-system status aws-load-balancer-controller || true
+          echo "=== kube-system deployments/services ==="
+          kubectl -n kube-system get deploy,rs,svc || true
 
       - name: Wait for AWS Load Balancer Controller webhook
         run: |
