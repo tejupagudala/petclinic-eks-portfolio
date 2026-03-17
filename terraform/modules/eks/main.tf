@@ -95,6 +95,17 @@ resource "aws_iam_role_policy_attachment" "eks_node_group_role_attachment" {
 
 }
 
+resource "aws_iam_policy" "aws_load_balancer_controller" {
+  name   = "${var.cluster_name}-AWSLoadBalancerControllerIAMPolicy"
+  policy = file("${path.module}/../../iam_policy.json")
+  tags   = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_group_alb_controller" {
+  role       = aws_iam_role.eks_node_group_role.name
+  policy_arn = aws_iam_policy.aws_load_balancer_controller.arn
+}
+
 resource "aws_eks_node_group" "node_groups" {
   for_each = var.node_groups
 
