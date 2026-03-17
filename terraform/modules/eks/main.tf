@@ -97,7 +97,7 @@ resource "aws_iam_role_policy_attachment" "eks_node_group_role_attachment" {
 
 resource "aws_iam_policy" "aws_load_balancer_controller" {
   name   = "${var.cluster_name}-AWSLoadBalancerControllerIAMPolicy"
-  policy = file("${path.module}/../../iam_policy.json")
+  policy = file("${path.root}/iam_policy.json")
   tags   = var.tags
 }
 
