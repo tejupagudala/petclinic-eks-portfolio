@@ -29,7 +29,17 @@ output "region" {
 
 output "nodegroup_names" {
   description = "EKS managed node group names"
-  value       = [for ng in aws_eks_node_group.node_groups : ng.node_group_name]
+  value       = module.eks.nodegroup_names
+}
+
+output "github_runner_instance_id" {
+  description = "EC2 instance ID of GitHub self-hosted runner (null if disabled)"
+  value       = var.enable_github_runner ? aws_instance.github_runner[0].id : null
+}
+
+output "github_runner_private_ip" {
+  description = "Private IP of GitHub self-hosted runner (null if disabled)"
+  value       = var.enable_github_runner ? aws_instance.github_runner[0].private_ip : null
 }
 
 # output "cur_bucket_name" {
