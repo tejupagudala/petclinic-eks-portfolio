@@ -14,7 +14,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Start self-hosted runner EC2
@@ -39,7 +39,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Setup Terraform
