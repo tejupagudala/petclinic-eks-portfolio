@@ -20,7 +20,8 @@ jobs:
       TF_VAR_github_org: ${{ vars.REPO_ORG }}
       TF_VAR_github_repo: ${{ vars.REPO_NAME }}
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
-      TF_VAR_existing_anomaly_monitor_arn: ${{ vars.EXISTING_ANOMALY_MONITOR_ARN }}
+      TF_VAR_enable_cost_anomaly_detection: "false"
+      TF_VAR_existing_anomaly_monitor_arn: ""
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4

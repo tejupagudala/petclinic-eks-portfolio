@@ -141,8 +141,51 @@ resource "aws_budgets_budget" "service_budgets" {
   }
 }
 
+data "external" "existing_dimensional_anomaly_monitor" {
+  count = var.enable_cost_anomaly_detection ? 1 : 0
+
+  program = [
+    "bash",
+    "-lc",
+    <<-EOT
+      set -euo pipefail
+      QUERY_DIMENSIONAL="AnomalyMonitors[?MonitorType=='DIMENSIONAL']|[0].MonitorArn"
+      QUERY_FIRST="AnomalyMonitors[0].MonitorArn"
+      PROFILE="${var.profile_name}"
+
+      ARN="$(aws ce get-anomaly-monitors --query "$QUERY_DIMENSIONAL" --output text 2>/dev/null || true)"
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        if [ -n "$PROFILE" ]; then
+          ARN="$(aws --profile "$PROFILE" ce get-anomaly-monitors --query "$QUERY_DIMENSIONAL" --output text 2>/dev/null || true)"
+        fi
+      fi
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        ARN="$(aws ce get-anomaly-monitors --query "$QUERY_FIRST" --output text 2>/dev/null || true)"
+      fi
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        if [ -n "$PROFILE" ]; then
+          ARN="$(aws --profile "$PROFILE" ce get-anomaly-monitors --query "$QUERY_FIRST" --output text 2>/dev/null || true)"
+        fi
+      fi
+
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        printf '{"arn":""}\n'
+      else
+        printf '{"arn":"%s"}\n' "$ARN"
+      fi
+    EOT
+  ]
+}
+
+locals {
+  anomaly_detection_enabled      = var.enable_cost_anomaly_detection
+  discovered_service_monitor_arn = local.anomaly_detection_enabled ? try(data.external.existing_dimensional_anomaly_monitor[0].result.arn, "") : ""
+  requested_service_monitor_arn  = trimspace(var.existing_anomaly_monitor_arn)
+  effective_service_monitor_arn  = local.requested_service_monitor_arn != "" ? local.requested_service_monitor_arn : local.discovered_service_monitor_arn
+}
+
 resource "aws_ce_anomaly_monitor" "service_monitor" {
-  count             = var.existing_anomaly_monitor_arn == "" ? 1 : 0
+  count             = local.anomaly_detection_enabled && local.effective_service_monitor_arn == "" ? 1 : 0
   name              = "${var.cluster_name}-service-anomaly-monitor"
   monitor_type      = "DIMENSIONAL"
   monitor_dimension = "SERVICE"
@@ -150,10 +193,13 @@ resource "aws_ce_anomaly_monitor" "service_monitor" {
 
 
 locals {
-  service_monitor_arn = var.existing_anomaly_monitor_arn != "" ? var.existing_anomaly_monitor_arn : aws_ce_anomaly_monitor.service_monitor[0].arn
+  service_monitor_arn = local.anomaly_detection_enabled ? (
+    local.effective_service_monitor_arn != "" ? local.effective_service_monitor_arn : aws_ce_anomaly_monitor.service_monitor[0].arn
+  ) : ""
 }
 
 resource "aws_ce_anomaly_subscription" "daily_anomaly" {
+  count            = local.anomaly_detection_enabled ? 1 : 0
   name             = "${var.cluster_name}-daily-anomaly-subscription"
   frequency        = "DAILY"
   monitor_arn_list = [local.service_monitor_arn]
@@ -258,6 +304,32 @@ data "aws_iam_policy_document" "github_actions_cost_ops" {
       local.eks_cluster_arn,
       local.eks_nodegroup_arn_pattern
     ]
+  }
+
+  statement {
+    sid = "RunnerEc2StartStopTagged"
+    actions = [
+      "ec2:StartInstances",
+      "ec2:StopInstances"
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:instance/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Role"
+      values   = ["github-self-hosted-runner"]
+    }
+  }
+
+  statement {
+    sid = "RunnerEc2Describe"
+    actions = [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus"
+    ]
+    resources = ["*"]
   }
 }
 
