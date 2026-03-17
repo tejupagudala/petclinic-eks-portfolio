@@ -50,7 +50,7 @@ resource "aws_eks_cluster" "main" {
     subnet_ids              = var.subnet_ids
     endpoint_private_access = true
     endpoint_public_access  = true
-    public_access_cidrs     = ["97.242.96.150/32", "2600:1008:a034:5f81:8121:688c:86c8:65bc/128"]
+    public_access_cidrs     = ["97.242.96.150/32"]
   }
 
   encryption_config {
