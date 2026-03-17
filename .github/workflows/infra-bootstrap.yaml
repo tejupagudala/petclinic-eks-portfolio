@@ -139,7 +139,10 @@ jobs:
             --set vpcId="$VPC_ID" \
             --atomic \
             --wait \
-            --timeout 10m
+            --timeout 10m \
+            --debug \
+            --wait-for-jobs \
+            --history-max 5
 
       - name: Diagnose AWS Load Balancer Controller install
         if: failure()
