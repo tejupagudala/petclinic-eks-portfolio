@@ -76,6 +76,7 @@ jobs:
 
       - name: Install AWS Load Balancer Controller
         run: |
+          set -euo pipefail
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
@@ -92,7 +93,9 @@ jobs:
               --query 'Policy.Arn' --output text)
           fi
 
-          eksctl utils associate-iam-oidc-provider --cluster "$CLUSTER_NAME" --region "$AWS_REGION" --approve
+          eksctl utils associate-iam-oidc-provider --cluster "$CLUSTER_NAME" --region "$AWS_REGION" --approve --timeout 10m
+
+          timeout 20s kubectl get nodes
 
           eksctl create iamserviceaccount \
             --cluster "$CLUSTER_NAME" \
@@ -102,7 +105,8 @@ jobs:
             --role-name "${CLUSTER_NAME}-aws-load-balancer-controller" \
             --attach-policy-arn "$POLICY_ARN" \
             --approve \
-            --override-existing-serviceaccounts
+            --override-existing-serviceaccounts \
+            --timeout 10m
 
           VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
           helm repo add eks https://aws.github.io/eks-charts
@@ -126,6 +130,8 @@ jobs:
           helm -n kube-system status aws-load-balancer-controller || true
           echo "=== kube-system deployments/services ==="
           kubectl -n kube-system get deploy,rs,svc || true
+          echo "=== kube-system events (last 200) ==="
+          kubectl -n kube-system get events --sort-by=.lastTimestamp | tail -n 200 || true
 
       - name: Wait for AWS Load Balancer Controller webhook
         run: |
