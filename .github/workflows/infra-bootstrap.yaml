@@ -69,15 +69,6 @@ jobs:
           set -euo pipefail
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
-          kubectl config set-credentials github-actions \
-            --exec-command aws \
-            --exec-arg eks \
-            --exec-arg get-token \
-            --exec-arg --region \
-            --exec-arg "$AWS_REGION" \
-            --exec-arg --cluster-name \
-            --exec-arg "$CLUSTER_NAME"
-          kubectl config set-context --current --user=github-actions
           aws sts get-caller-identity
           kubectl auth can-i get pods -A
           kubectl get ns
