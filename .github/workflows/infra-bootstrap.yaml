@@ -154,6 +154,22 @@ jobs:
 
       - name: Install Prometheus + Grafana
         run: |
+          set -euo pipefail
+          if ! kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook >/dev/null 2>&1; then
+            echo "ALB webhook missing; restarting controller to recreate."
+            kubectl -n kube-system rollout restart deploy/aws-load-balancer-controller
+            kubectl -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=300s
+          else
+            CABUNDLE_LEN=$(kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | wc -c | tr -d ' ')
+            if [ "${CABUNDLE_LEN}" -lt 20 ]; then
+              echo "ALB webhook CA bundle looks invalid; recreating."
+              kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook || true
+              kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook || true
+              kubectl -n kube-system delete secret aws-load-balancer-tls || true
+              kubectl -n kube-system rollout restart deploy/aws-load-balancer-controller
+              kubectl -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=300s
+            fi
+          fi
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
           helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
