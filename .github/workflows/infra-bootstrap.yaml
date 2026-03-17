@@ -115,6 +115,11 @@ jobs:
             --set region="$AWS_REGION" \
             --set vpcId="$VPC_ID"
 
+      - name: Wait for AWS Load Balancer Controller webhook
+        run: |
+          kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
+          kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=600s
+
       - name: Install Argo CD
         run: |
           helm repo add argo https://argoproj.github.io/argo-helm
@@ -138,7 +143,6 @@ jobs:
 
       - name: Readiness checks
         run: |
-          kubectl wait --for=condition=Available -n kube-system deployment/aws-load-balancer-controller --timeout=600s
           kubectl wait --for=condition=Available -n argocd deployment/argocd-server --timeout=600s
           kubectl get pods -n monitoring
           kubectl get ingress -n petclinic
