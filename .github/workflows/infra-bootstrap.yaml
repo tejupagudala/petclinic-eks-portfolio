@@ -33,6 +33,7 @@ jobs:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
       TF_VAR_enable_cost_anomaly_detection: "false"
       TF_VAR_existing_anomaly_monitor_arn: ""
+      TF_VAR_aws_auth_role_arns: '["${{ secrets.AWS_ROLE_ARN_INFRA }}","${{ secrets.AWS_ROLE_ARN }}"]'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

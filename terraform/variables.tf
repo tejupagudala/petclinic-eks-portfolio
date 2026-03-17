@@ -154,6 +154,12 @@ variable "node_groups" {
   }
 }
 
+variable "aws_auth_role_arns" {
+  description = "IAM role ARNs to grant cluster-admin access via aws-auth"
+  type        = list(string)
+  default     = []
+}
+
 # Optional: self-hosted GitHub runner EC2 (cost-controlled)
 variable "enable_github_runner" {
   description = "Whether to create an EC2 instance for GitHub self-hosted runner"

@@ -13,3 +13,8 @@ output "nodegroup_names" {
   description = "EKS managed node group names"
   value       = [for ng in aws_eks_node_group.node_groups : ng.node_group_name]
 }
+
+output "node_group_role_arn" {
+  description = "IAM role ARN used by EKS node groups"
+  value       = aws_iam_role.eks_node_group_role.arn
+}

@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.3"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.25"
+    }
   }
 
   backend "s3" {
@@ -48,4 +52,50 @@ module "eks" {
   vpc_id          = module.vpc.vpc_id
   subnet_ids      = module.vpc.private_subnet_ids
   node_groups     = var.node_groups
+}
+
+data "aws_eks_cluster" "this" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.this.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
+  token                  = data.aws_eks_cluster_auth.this.token
+}
+
+locals {
+  aws_auth_roles = concat(
+    [
+      {
+        rolearn  = module.eks.node_group_role_arn
+        username = "system:node:{{EC2PrivateDNSName}}"
+        groups   = ["system:bootstrappers", "system:nodes"]
+      }
+    ],
+    [
+      for arn in var.aws_auth_role_arns : {
+        rolearn  = arn
+        username = arn
+        groups   = ["system:masters"]
+      }
+    ]
+  )
+}
+
+resource "kubernetes_config_map_v1" "aws_auth" {
+  metadata {
+    name      = "aws-auth"
+    namespace = "kube-system"
+  }
+
+  data = {
+    mapRoles = yamlencode(local.aws_auth_roles)
+  }
+
+  depends_on = [module.eks]
 }
