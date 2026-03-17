@@ -124,6 +124,12 @@ jobs:
               helm -n kube-system uninstall aws-load-balancer-controller
             fi
           fi
+          STATUS="$(helm -n kube-system status aws-load-balancer-controller 2>/dev/null | awk '/^STATUS:/{print $2}' || true)"
+          if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
+            echo "Release still pending after rollback. Uninstalling for a clean install."
+            helm -n kube-system uninstall aws-load-balancer-controller || true
+          fi
+          echo "Starting Helm upgrade/install for aws-load-balancer-controller"
           helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
             -n kube-system \
             --set clusterName="$CLUSTER_NAME" \
