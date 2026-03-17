@@ -119,6 +119,17 @@ jobs:
         run: |
           kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
           kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=600s
+        timeout-minutes: 12
+
+      - name: Dump AWS Load Balancer Controller diagnostics
+        if: failure()
+        run: |
+          echo "=== aws-load-balancer-controller pods ==="
+          kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide || true
+          echo "=== aws-load-balancer-controller describe ==="
+          kubectl -n kube-system describe pods -l app.kubernetes.io/name=aws-load-balancer-controller || true
+          echo "=== aws-load-balancer-controller logs ==="
+          kubectl -n kube-system logs -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200 || true
 
       - name: Install Argo CD
         run: |
