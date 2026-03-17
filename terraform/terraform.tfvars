@@ -11,8 +11,8 @@ node_groups = {
     instance_types = ["t3.small"]
     capacity_type  = "SPOT"
     scaling_config = {
-      desired_size = 2
-      max_size     = 2
+      desired_size = 3
+      max_size     = 3
       min_size     = 1
     }
   }
