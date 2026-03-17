@@ -93,11 +93,11 @@ jobs:
               --query 'Policy.Arn' --output text)
           fi
 
-          eksctl utils associate-iam-oidc-provider --cluster "$CLUSTER_NAME" --region "$AWS_REGION" --approve --timeout 10m
+          timeout 10m eksctl utils associate-iam-oidc-provider --cluster "$CLUSTER_NAME" --region "$AWS_REGION" --approve
 
           timeout 20s kubectl get nodes
 
-          eksctl create iamserviceaccount \
+          timeout 10m eksctl create iamserviceaccount \
             --cluster "$CLUSTER_NAME" \
             --region "$AWS_REGION" \
             --namespace kube-system \
@@ -105,8 +105,7 @@ jobs:
             --role-name "${CLUSTER_NAME}-aws-load-balancer-controller" \
             --attach-policy-arn "$POLICY_ARN" \
             --approve \
-            --override-existing-serviceaccounts \
-            --timeout 10m
+            --override-existing-serviceaccounts
 
           VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
           helm repo add eks https://aws.github.io/eks-charts
