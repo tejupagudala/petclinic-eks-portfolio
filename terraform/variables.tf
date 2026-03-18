@@ -197,6 +197,19 @@ variable "github_runner_root_volume_size" {
   default     = 30
 }
 
+variable "github_runner_pat" {
+  description = "GitHub PAT with repo admin:org scope to register self-hosted runner (stored in SSM SecureString)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "github_runner_pat_parameter_name" {
+  description = "SSM parameter name for GitHub PAT used to register the runner"
+  type        = string
+  default     = "/petclinic/github-runner-pat"
+}
+
 variable "github_runner_allowed_ssh_cidrs" {
   description = "Optional list of CIDRs allowed to SSH into runner. Keep empty to disable SSH ingress."
   type        = list(string)

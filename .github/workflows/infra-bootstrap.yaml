@@ -23,8 +23,20 @@ jobs:
 
       - name: Start self-hosted runner EC2
         run: |
-          aws ec2 start-instances --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
-          aws ec2 wait instance-status-ok --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
+          CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="demo-eks-cluster"
+          fi
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Runner instance not found (tag Name=demo-eks-cluster-github-runner)."
+            exit 1
+          fi
+          aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
           sleep 45
 
   bootstrap:

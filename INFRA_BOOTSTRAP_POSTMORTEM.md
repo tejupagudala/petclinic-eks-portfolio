@@ -30,6 +30,8 @@ These changes were implemented to reduce future failures.
 4. Webhook CA preflight before Prometheus install; reinstalls controller if invalid.
 5. Cluster-only destroy workflow that keeps VPC and runner.
 6. Post-destroy verification step to detect leftover resources, including EBS volumes and snapshots.
+7. Runner auto-registration via EC2 `user_data` using a GitHub PAT stored in SSM Parameter Store.
+8. Runner discovery by tag in `infra-bootstrap` (no more manual `RUNNER_INSTANCE_ID` updates).
 
 ## Operational Notes
 
@@ -37,6 +39,31 @@ These changes were implemented to reduce future failures.
 2. `t3.small` nodes hit pod limits quickly. If installs stall with `Too many pods`, scale the node group.
 3. Webhook TLS errors (`x509`) are fixed by reinstating the ALB controller so it regenerates the webhook certs.
 4. Helm `pending-*` means a previous install or upgrade left a lock. Roll back or uninstall before retrying.
+5. The runner is now auto-registered at boot if `github_runner_pat` is set. The workflow starts it by tag.
+
+## Runner Automation (New)
+
+To avoid manual runner registration on every rebuild:
+
+1. Set a GitHub PAT (repo admin) in Terraform:
+   - `github_runner_pat` (stored as SSM SecureString)
+2. Apply Terraform to create the runner.
+3. `infra-bootstrap` now discovers the runner instance by tag:
+   - `Name=${EKS_CLUSTER_NAME}-github-runner`
+   - Falls back to `demo-eks-cluster` if the secret isn’t set.
+
+This makes rebuilds a two-step process: Terraform apply + run `infra-bootstrap`.
+
+### How the Runner Auto-Start Works
+
+The workflow uses this logic to find and start the runner automatically:
+
+- Read cluster name from `secrets.EKS_CLUSTER_NAME`.
+- If missing, fallback to `demo-eks-cluster`.
+- Find the EC2 instance with tag: `Name=${CLUSTER_NAME}-github-runner`.
+- Start it and wait for status OK.
+
+This removes the need to manually set `RUNNER_INSTANCE_ID` after rebuilds.
 
 ## Destroy Behavior
 
