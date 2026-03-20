@@ -48,6 +48,8 @@ module "eks" {
   vpc_id          = module.vpc.vpc_id
   subnet_ids      = module.vpc.private_subnet_ids
   node_groups     = var.node_groups
+  public_endpoint_enabled = var.eks_public_endpoint_enabled
+  public_access_cidrs     = var.eks_public_access_cidrs
 }
 
 resource "aws_eks_access_entry" "admin_roles" {

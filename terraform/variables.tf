@@ -47,6 +47,18 @@ variable "cluster_version" {
   default     = "1.32"
 }
 
+variable "eks_public_endpoint_enabled" {
+  description = "Enable public access to the EKS API endpoint"
+  type        = bool
+  default     = false
+}
+
+variable "eks_public_access_cidrs" {
+  description = "CIDR blocks allowed to access the public EKS endpoint"
+  type        = list(string)
+  default     = []
+}
+
 # GitHub OIDC + repo metadata
 variable "github_org" {
   description = "GitHub repository name"
