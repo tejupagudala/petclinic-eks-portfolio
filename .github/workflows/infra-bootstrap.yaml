@@ -85,9 +85,11 @@ jobs:
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
+          export KUBECONFIG="$HOME/.kube/config"
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
-          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
           aws sts get-caller-identity
+          kubectl config use-context "arn:aws:eks:${AWS_REGION}:479407618698:cluster/${CLUSTER_NAME}"
           kubectl auth can-i get pods -A
           kubectl get ns
 
