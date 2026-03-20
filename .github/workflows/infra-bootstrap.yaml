@@ -12,35 +12,73 @@ permissions:
   contents: read
 
 jobs:
-  start-runner:
+  prepare-runner:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_enable_cost_anomaly_detection: "false"
+      TF_VAR_existing_anomaly_monitor_arn: ""
+      TF_VAR_aws_auth_role_arns: '["${{ secrets.AWS_ROLE_ARN_INFRA }}","${{ secrets.AWS_ROLE_ARN }}"]'
+      TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Start self-hosted runner EC2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Create or refresh self-hosted runner EC2
         run: |
-          CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false -target=aws_instance.github_runner
+
+      - name: Ensure self-hosted runner EC2 is running
+        run: |
+          set -euo pipefail
+
+          CLUSTER_NAME="$(terraform -chdir=terraform output -raw cluster_name 2>/dev/null || true)"
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          fi
           if [ -z "$CLUSTER_NAME" ]; then
             CLUSTER_NAME="demo-eks-cluster"
           fi
+
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
-            --region "${{ secrets.AWS_REGION }}" \
+            --region "$AWS_REGION" \
             --query "Reservations[].Instances[].InstanceId" --output text)
           if [ -z "$INSTANCE_ID" ]; then
-            echo "Runner instance not found (tag Name=demo-eks-cluster-github-runner)."
+            echo "Runner instance not found after targeted Terraform apply (tag Name=${CLUSTER_NAME}-github-runner)."
             exit 1
           fi
-          aws ec2 start-instances --instance-ids "$INSTANCE_ID"
-          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
-          sleep 45
+
+          STATE=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query "Reservations[0].Instances[0].State.Name" --output text)
+
+          if [ "$STATE" = "stopped" ] || [ "$STATE" = "stopping" ]; then
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          fi
+
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          sleep 60
 
   bootstrap:
-    needs: [start-runner]
+    needs: [prepare-runner]
     runs-on: [self-hosted, linux, aws-vpc]
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -65,6 +103,26 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
+
+      - name: Confirm self-hosted runner EC2 is healthy
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name 2>/dev/null || true)
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          fi
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="demo-eks-cluster"
+          fi
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --region "$AWS_REGION" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Runner instance not found before bootstrap."
+            exit 1
+          fi
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
 
       - name: Terraform init/apply
         run: |
