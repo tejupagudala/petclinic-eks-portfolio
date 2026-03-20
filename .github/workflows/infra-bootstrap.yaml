@@ -85,6 +85,7 @@ jobs:
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
+          export HOME="${HOME:-/root}"
           export KUBECONFIG="$HOME/.kube/config"
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
