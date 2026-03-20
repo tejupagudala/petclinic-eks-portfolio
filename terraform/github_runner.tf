@@ -1,5 +1,5 @@
 locals {
-  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.vpc.private_subnet_ids[0]
+  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.vpc.public_subnet_ids[0]
 }
 
 data "aws_ami" "github_runner" {
@@ -116,7 +116,7 @@ resource "aws_instance" "github_runner" {
   vpc_security_group_ids      = [aws_security_group.github_runner[0].id]
   iam_instance_profile        = aws_iam_instance_profile.github_runner[0].name
   key_name                    = var.github_runner_key_name != "" ? var.github_runner_key_name : null
-  associate_public_ip_address = false
+  associate_public_ip_address = true
   user_data = templatefile("${path.module}/github_runner_userdata.sh.tmpl", {
     region                          = var.region
     github_org                      = var.github_org
