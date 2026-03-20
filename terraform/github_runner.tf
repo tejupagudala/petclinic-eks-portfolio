@@ -117,56 +117,13 @@ resource "aws_instance" "github_runner" {
   iam_instance_profile        = aws_iam_instance_profile.github_runner[0].name
   key_name                    = var.github_runner_key_name != "" ? var.github_runner_key_name : null
   associate_public_ip_address = false
-  user_data                   = <<-USERDATA
-    #!/bin/bash
-    set -euo pipefail
-
-    REGION="${var.region}"
-    ORG="${var.github_org}"
-    REPO="${var.github_repo}"
-    PARAM_NAME="${var.github_runner_pat_parameter_name}"
-    RUNNER_DIR="/opt/actions-runner"
-    RUNNER_USER="ec2-user"
-
-    if [ -f "$RUNNER_DIR/.runner" ]; then
-      exit 0
-    fi
-
-    dnf -y install curl jq tar gzip
-
-    mkdir -p "$RUNNER_DIR"
-    chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
-
-    cd "$RUNNER_DIR"
-    LATEST="$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)"
-    VERSION="${LATEST#v}"
-    if [ ! -f "actions-runner-linux-x64-${VERSION}.tar.gz" ]; then
-      curl -s -L -o "actions-runner-linux-x64-${VERSION}.tar.gz" \
-        "https://github.com/actions/runner/releases/download/v${VERSION}/actions-runner-linux-x64-${VERSION}.tar.gz"
-    fi
-    tar xzf "actions-runner-linux-x64-${VERSION}.tar.gz"
-
-    PAT="$(aws ssm get-parameter --name "$PARAM_NAME" --with-decryption --region "$REGION" --query Parameter.Value --output text)"
-    if [ -z "$PAT" ] || [ "$PAT" = "None" ]; then
-      echo "Missing GitHub PAT in SSM parameter: $PARAM_NAME"
-      exit 1
-    fi
-
-    REG_TOKEN="$(curl -s -X POST \
-      -H "Authorization: token $PAT" \
-      -H "Accept: application/vnd.github+json" \
-      "https://api.github.com/repos/$ORG/$REPO/actions/runners/registration-token" | jq -r .token)"
-
-    if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
-      echo "Failed to obtain GitHub runner registration token."
-      exit 1
-    fi
-
-    su - "$RUNNER_USER" -c "$RUNNER_DIR/config.sh --url https://github.com/$ORG/$REPO --token $REG_TOKEN --unattended --name ${var.cluster_name}-runner-$(hostname) --labels self-hosted,linux,aws-vpc --replace"
-
-    "$RUNNER_DIR/svc.sh" install
-    "$RUNNER_DIR/svc.sh" start
-USERDATA
+  user_data = templatefile("${path.module}/github_runner_userdata.sh.tmpl", {
+    region                          = var.region
+    github_org                      = var.github_org
+    github_repo                     = var.github_repo
+    github_runner_pat_parameter_name = var.github_runner_pat_parameter_name
+    cluster_name                    = var.cluster_name
+  })
 
   root_block_device {
     volume_size = var.github_runner_root_volume_size
