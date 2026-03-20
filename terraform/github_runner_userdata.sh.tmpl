@@ -12,7 +12,7 @@ if [ -f "$RUNNER_DIR/.runner" ]; then
   exit 0
 fi
 
-dnf -y install curl jq tar gzip
+dnf -y install jq tar gzip
 
 mkdir -p "$RUNNER_DIR"
 chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
@@ -25,6 +25,11 @@ if [ ! -f "actions-runner-linux-x64-$VERSION.tar.gz" ]; then
     "https://github.com/actions/runner/releases/download/v$VERSION/actions-runner-linux-x64-$VERSION.tar.gz"
 fi
 tar xzf "actions-runner-linux-x64-$VERSION.tar.gz"
+chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
+
+# Required .NET dependencies for runner on AL2023
+dnf -y install libicu openssl-libs krb5-libs zlib libstdc++ libgcc lttng-ust libunwind libuuid || \
+  dnf -y install icu openssl-libs krb5-libs zlib libstdc++ libgcc lttng-ust libunwind libuuid
 
 PAT="$(aws ssm get-parameter --name "$PARAM_NAME" --with-decryption --region "$REGION" --query Parameter.Value --output text)"
 if [ -z "$PAT" ] || [ "$PAT" = "None" ]; then
@@ -45,5 +50,6 @@ fi
 RUNNER_NAME="${cluster_name}-runner-$(hostname)"
 su - "$RUNNER_USER" -c "$RUNNER_DIR/config.sh --url https://github.com/$ORG/$REPO --token $REG_TOKEN --unattended --name $RUNNER_NAME --labels self-hosted,linux,aws-vpc --replace"
 
-"$RUNNER_DIR/svc.sh" install
-"$RUNNER_DIR/svc.sh" start
+cd "$RUNNER_DIR"
+./svc.sh install
+./svc.sh start
