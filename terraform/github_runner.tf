@@ -96,7 +96,7 @@ resource "aws_iam_role_policy" "github_runner_ssm_param" {
           "ssm:GetParameter",
           "ssm:GetParameters"
         ]
-        Resource = "arn:${data.aws_partition.current.partition}:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.github_runner_pat_parameter_name}"
+        Resource = "arn:${data.aws_partition.current.partition}:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trim(var.github_runner_pat_parameter_name, "/")}"
       }
     ]
   })
@@ -128,16 +128,16 @@ resource "aws_instance" "github_runner" {
     RUNNER_DIR="/opt/actions-runner"
     RUNNER_USER="ec2-user"
 
-    if [ -f "${RUNNER_DIR}/.runner" ]; then
+    if [ -f "$RUNNER_DIR/.runner" ]; then
       exit 0
     fi
 
     dnf -y install curl jq tar gzip
 
-    mkdir -p "${RUNNER_DIR}"
-    chown -R "${RUNNER_USER}:${RUNNER_USER}" "${RUNNER_DIR}"
+    mkdir -p "$RUNNER_DIR"
+    chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
 
-    cd "${RUNNER_DIR}"
+    cd "$RUNNER_DIR"
     LATEST="$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)"
     VERSION="${LATEST#v}"
     if [ ! -f "actions-runner-linux-x64-${VERSION}.tar.gz" ]; then
@@ -146,27 +146,27 @@ resource "aws_instance" "github_runner" {
     fi
     tar xzf "actions-runner-linux-x64-${VERSION}.tar.gz"
 
-    PAT="$(aws ssm get-parameter --name "${PARAM_NAME}" --with-decryption --region "${REGION}" --query Parameter.Value --output text)"
-    if [ -z "${PAT}" ] || [ "${PAT}" = "None" ]; then
-      echo "Missing GitHub PAT in SSM parameter: ${PARAM_NAME}"
+    PAT="$(aws ssm get-parameter --name "$PARAM_NAME" --with-decryption --region "$REGION" --query Parameter.Value --output text)"
+    if [ -z "$PAT" ] || [ "$PAT" = "None" ]; then
+      echo "Missing GitHub PAT in SSM parameter: $PARAM_NAME"
       exit 1
     fi
 
     REG_TOKEN="$(curl -s -X POST \
-      -H "Authorization: token ${PAT}" \
+      -H "Authorization: token $PAT" \
       -H "Accept: application/vnd.github+json" \
-      "https://api.github.com/repos/${ORG}/${REPO}/actions/runners/registration-token" | jq -r .token)"
+      "https://api.github.com/repos/$ORG/$REPO/actions/runners/registration-token" | jq -r .token)"
 
-    if [ -z "${REG_TOKEN}" ] || [ "${REG_TOKEN}" = "null" ]; then
+    if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
       echo "Failed to obtain GitHub runner registration token."
       exit 1
     fi
 
-    su - "${RUNNER_USER}" -c "${RUNNER_DIR}/config.sh --url https://github.com/${ORG}/${REPO} --token ${REG_TOKEN} --unattended --name ${var.cluster_name}-runner-$(hostname) --labels self-hosted,linux,aws-vpc --replace"
+    su - "$RUNNER_USER" -c "$RUNNER_DIR/config.sh --url https://github.com/$ORG/$REPO --token $REG_TOKEN --unattended --name ${var.cluster_name}-runner-$(hostname) --labels self-hosted,linux,aws-vpc --replace"
 
-    "${RUNNER_DIR}/svc.sh" install
-    "${RUNNER_DIR}/svc.sh" start
-  USERDATA
+    "$RUNNER_DIR/svc.sh" install
+    "$RUNNER_DIR/svc.sh" start
+USERDATA
 
   root_block_device {
     volume_size = var.github_runner_root_volume_size
