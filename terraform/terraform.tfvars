@@ -5,6 +5,7 @@ existing_anomaly_monitor_arn  = ""
 github_org                    = "tejupagudala"
 github_repo                   = "petclinic-eks-portfolio"
 github_branch                 = "main"
+eks_public_endpoint_enabled = true
 
 node_groups = {
   "demo-node-group" = {

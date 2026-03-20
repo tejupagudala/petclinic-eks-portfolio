@@ -22,6 +22,7 @@ jobs:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
       TF_VAR_enable_cost_anomaly_detection: "false"
       TF_VAR_existing_anomaly_monitor_arn: ""
+      CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -35,6 +36,83 @@ jobs:
         run: |
           terraform -chdir=terraform init -input=false
           terraform -chdir=terraform destroy -auto-approve -input=false
+      - name: Verify teardown
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME="${CLUSTER_NAME:-demo-eks-cluster}"
+          EXIT=0
+
+          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1; then
+            echo "EKS cluster still exists: $CLUSTER_NAME"
+            EXIT=1
+          fi
+
+          RUNNER_IDS=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+          if [ -n "$RUNNER_IDS" ]; then
+            echo "Runner instances still exist: $RUNNER_IDS"
+            EXIT=1
+          fi
+
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-vpc" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Vpcs[0].VpcId" --output text)
+          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+            echo "VPC still exists: $VPC_ID"
+            EXIT=1
+
+            NATS=$(aws ec2 describe-nat-gateways \
+              --filter Name=vpc-id,Values="$VPC_ID" Name=state,Values=available,pending,deleting \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "NatGateways[].NatGatewayId" --output text)
+            if [ -n "$NATS" ]; then
+              echo "NAT gateways still exist: $NATS"
+              EXIT=1
+            fi
+
+            LBS=$(aws elbv2 describe-load-balancers \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" --output text)
+            if [ -n "$LBS" ]; then
+              echo "ALBs/NLBs still exist in VPC: $LBS"
+              EXIT=1
+            fi
+          fi
+
+          EIPS=$(aws ec2 describe-addresses \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Addresses[?Tags!=null && contains(join(',', Tags[].Value), '${CLUSTER_NAME}')].[AllocationId,PublicIp]" --output text)
+          if [ -n "$EIPS" ]; then
+            echo "Tagged EIPs still exist: $EIPS"
+            EXIT=1
+          fi
+
+          VOLS=$(aws ec2 describe-volumes \
+            --region "${{ secrets.AWS_REGION }}" \
+            --filters Name=status,Values=available \
+            --query "Volumes[?Tags!=null && contains(join(',', Tags[].Value), '${CLUSTER_NAME}')].[VolumeId,Size]" --output text)
+          if [ -n "$VOLS" ]; then
+            echo "Detached EBS volumes still exist: $VOLS"
+            EXIT=1
+          fi
+
+          SNAPSHOTS=$(aws ec2 describe-snapshots \
+            --owner-ids self \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Snapshots[?Tags!=null && contains(join(',', Tags[].Value), '${CLUSTER_NAME}')].[SnapshotId,VolumeId]" --output text)
+          if [ -n "$SNAPSHOTS" ]; then
+            echo "EBS snapshots still exist: $SNAPSHOTS"
+            EXIT=1
+          fi
+
+          if [ "$EXIT" -ne 0 ]; then
+            echo "Teardown verification failed."
+            exit 1
+          fi
+          echo "Teardown verified: no cluster, runner, VPC, NAT, or tagged EIPs."
 
   stop-runner:
     if: always() && needs.destroy.result != 'skipped'
