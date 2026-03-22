@@ -75,3 +75,23 @@ resource "aws_eks_access_policy_association" "admin_roles" {
 
   depends_on = [aws_eks_access_entry.admin_roles]
 }
+
+resource "aws_eks_access_entry" "github_actions_cost_ops" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = aws_iam_role.github_actions_cost_ops.arn
+  type          = "STANDARD"
+
+  depends_on = [module.eks, aws_iam_role.github_actions_cost_ops]
+}
+
+resource "aws_eks_access_policy_association" "github_actions_cost_ops" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = aws_iam_role.github_actions_cost_ops.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.github_actions_cost_ops]
+}
