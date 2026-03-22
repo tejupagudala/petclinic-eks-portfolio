@@ -311,7 +311,9 @@ jobs:
         run: |
           kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
-          kubectl apply -f kubernetes/mysql/
+          kubectl apply -f kubernetes/mysql/mysql-secret.yaml
+          kubectl apply -f kubernetes/mysql/deploy.yaml
+          kubectl apply -f kubernetes/mysql/service.yaml
           kubectl apply -f kubernetes/discovery-server/
           kubectl apply -f kubernetes/config-server/
           kubectl apply -f kubernetes/customers-service/
