@@ -9,6 +9,11 @@ output "cluster_name" {
   value       = aws_eks_cluster.main.name
 }
 
+output "cluster_security_group_id" {
+  description = "EKS cluster security group ID"
+  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+}
+
 output "nodegroup_names" {
   description = "EKS managed node group names"
   value       = [for ng in aws_eks_node_group.node_groups : ng.node_group_name]

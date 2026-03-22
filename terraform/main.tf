@@ -52,6 +52,20 @@ module "eks" {
   public_access_cidrs     = var.eks_public_access_cidrs
 }
 
+resource "aws_security_group_rule" "github_runner_to_eks_api" {
+  count = var.enable_github_runner ? 1 : 0
+
+  type                     = "ingress"
+  description              = "Allow self-hosted GitHub runner to reach the EKS private API"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = module.eks.cluster_security_group_id
+  source_security_group_id = aws_security_group.github_runner[0].id
+
+  depends_on = [module.eks, aws_security_group.github_runner]
+}
+
 resource "aws_eks_access_entry" "admin_roles" {
   for_each = toset(var.aws_auth_role_arns)
 
