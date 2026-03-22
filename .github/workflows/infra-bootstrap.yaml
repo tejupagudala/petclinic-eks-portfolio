@@ -41,7 +41,18 @@ jobs:
       - name: Create or refresh self-hosted runner EC2
         run: |
           terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform apply -auto-approve -input=false -target=aws_instance.github_runner
+          terraform -chdir=terraform apply -auto-approve -input=false \
+            -target=module.vpc.aws_vpc.main \
+            -target=module.vpc.aws_subnet.public \
+            -target=module.vpc.aws_internet_gateway.main \
+            -target=module.vpc.aws_route_table.public \
+            -target=module.vpc.aws_route_table_association.public \
+            -target=aws_security_group.github_runner \
+            -target=aws_iam_role.github_runner_ec2 \
+            -target=aws_iam_role_policy_attachment.github_runner_ssm \
+            -target=aws_iam_role_policy.github_runner_ssm_param \
+            -target=aws_iam_instance_profile.github_runner \
+            -target=aws_instance.github_runner
 
       - name: Ensure self-hosted runner EC2 is running
         run: |
