@@ -269,14 +269,37 @@ jobs:
           helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
             -n monitoring --create-namespace
 
-      - name: Apply app monitoring and Argo Applications
+      - name: Deploy Petclinic workloads
         run: |
+          kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
-          kubectl apply -f kubernetes/argocd/api-gateway-application.yaml
-          kubectl apply -f kubernetes/argocd/vets-service-application.yaml
+          kubectl apply -f kubernetes/mysql/
+          kubectl apply -f kubernetes/discovery-server/
+          kubectl apply -f kubernetes/config-server/
+          kubectl apply -f kubernetes/customers-service/
+          kubectl apply -f kubernetes/vets-service/
+          kubectl apply -f kubernetes/visits-service/
+          kubectl apply -f kubernetes/api-gateway/
 
       - name: Readiness checks
         run: |
           kubectl wait --for=condition=Available -n argocd deployment/argocd-server --timeout=600s
+          kubectl -n petclinic rollout status deployment/mysql --timeout=600s
+          kubectl -n petclinic rollout status deployment/discovery-server --timeout=600s
+          kubectl -n petclinic rollout status deployment/config-server --timeout=600s
+          kubectl -n petclinic rollout status deployment/customers-service --timeout=600s
+          kubectl -n petclinic rollout status deployment/vets-service --timeout=600s
+          kubectl -n petclinic rollout status deployment/visits-service --timeout=600s
+          kubectl -n petclinic rollout status deployment/api-gateway --timeout=600s
+          for i in {1..60}; do
+            ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$ALB" ]; then
+              echo "Petclinic ingress hostname: $ALB"
+              break
+            fi
+            sleep 10
+          done
+          test -n "${ALB}"
           kubectl get pods -n monitoring
+          kubectl get pods -n petclinic
           kubectl get ingress -n petclinic
