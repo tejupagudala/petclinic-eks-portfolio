@@ -156,8 +156,9 @@ jobs:
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
-          export HOME="${HOME:-/root}"
-          export KUBECONFIG="$HOME/.kube/config"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
           aws sts get-caller-identity

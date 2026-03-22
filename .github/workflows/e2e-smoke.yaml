@@ -1,9 +1,8 @@
 name: e2e-smoke
 
 on:
-  workflow_dispatch:
   workflow_run:
-    workflows: ["api-gateway-ci"]
+    workflows: ["infra-bootstrap"]
     types: [completed]
 
 permissions:
@@ -12,7 +11,7 @@ permissions:
 
 jobs:
   smoke:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: [self-hosted, linux, aws-vpc]
     steps:
       - name: Checkout
@@ -34,7 +33,10 @@ jobs:
 
       - name: Configure kubeconfig
         run: |
-          aws eks update-kubeconfig --name "${{ secrets.EKS_CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig --name "${{ secrets.EKS_CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}" --kubeconfig "$KUBECONFIG"
 
       - name: Wait for ingress hostname
         run: |
