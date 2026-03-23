@@ -17,14 +17,29 @@ spec:
         app.kubernetes.io/name: api-gateway
         app.kubernetes.io/part-of: petclinic
     spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: app-config
           configMap:
             name: api-gateway-config
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: api-gateway
-          image: tejupagudala/api-gateway:23164672036
+          image: tejupagudala/api-gateway:23418219938
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
           ports:
             - name: http
               containerPort: 8080
@@ -53,6 +68,8 @@ spec:
             - name: app-config
               mountPath: /config/application.yml
               subPath: application.yml
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             tcpSocket:
               port: http
