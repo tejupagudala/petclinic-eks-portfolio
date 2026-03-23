@@ -128,4 +128,31 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Stop self-hosted runner EC2
         run: |
-          aws ec2 stop-instances --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
+          set -euo pipefail
+          INSTANCE_ID="${{ vars.RUNNER_INSTANCE_ID }}"
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "RUNNER_INSTANCE_ID is not set; skipping runner stop."
+            exit 0
+          fi
+
+          if ! aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1; then
+            echo "Runner instance $INSTANCE_ID does not exist; skipping stop."
+            exit 0
+          fi
+
+          STATE=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+
+          if [ "$STATE" = "stopped" ] || [ "$STATE" = "stopping" ]; then
+            echo "Runner instance $INSTANCE_ID is already $STATE; nothing to do."
+            exit 0
+          fi
+
+          aws ec2 stop-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "${{ secrets.AWS_REGION }}"
