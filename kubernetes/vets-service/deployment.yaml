@@ -33,9 +33,9 @@ spec:
                 echo "waiting for mysql:3306..."
                 sleep 2
               done
-      containers:
-        - name: vets-service
-          image: tejupagudala/vets-service:23063048247
+        containers:
+          - name: vets-service
+          image: tejupagudala/vets-service:23464787919
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
