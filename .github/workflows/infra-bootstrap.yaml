@@ -309,6 +309,16 @@ jobs:
 
       - name: Deploy Petclinic workloads
         run: |
+          if kubectl get namespace petclinic >/dev/null 2>&1; then
+            for i in {1..60}; do
+              PHASE=$(kubectl get namespace petclinic -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              if [ "$PHASE" != "Terminating" ]; then
+                break
+              fi
+              echo "petclinic namespace is still terminating; waiting..."
+              sleep 5
+            done
+          fi
           kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
           kubectl apply -f kubernetes/mysql/mysql-secret.yaml
