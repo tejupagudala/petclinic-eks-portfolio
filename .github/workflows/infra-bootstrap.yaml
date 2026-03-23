@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: infra-bootstrap-${{ github.ref }}
+  group: terraform-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:

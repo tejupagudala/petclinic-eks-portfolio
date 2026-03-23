@@ -8,6 +8,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
@@ -113,46 +117,3 @@ jobs:
             exit 1
           fi
           echo "Teardown verified: no cluster, runner, VPC, NAT, or tagged EIPs."
-
-  stop-runner:
-    if: always() && needs.destroy.result != 'skipped'
-    needs: [destroy]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - name: Stop self-hosted runner EC2
-        run: |
-          set -euo pipefail
-          INSTANCE_ID="${{ vars.RUNNER_INSTANCE_ID }}"
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "RUNNER_INSTANCE_ID is not set; skipping runner stop."
-            exit 0
-          fi
-
-          if ! aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1; then
-            echo "Runner instance $INSTANCE_ID does not exist; skipping stop."
-            exit 0
-          fi
-
-          STATE=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "${{ secrets.AWS_REGION }}" \
-            --query "Reservations[0].Instances[0].State.Name" \
-            --output text)
-
-          if [ "$STATE" = "stopped" ] || [ "$STATE" = "stopping" ]; then
-            echo "Runner instance $INSTANCE_ID is already $STATE; nothing to do."
-            exit 0
-          fi
-
-          aws ec2 stop-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "${{ secrets.AWS_REGION }}"
