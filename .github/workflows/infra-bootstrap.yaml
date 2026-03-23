@@ -221,9 +221,10 @@ jobs:
 
       - name: Wait for AWS Load Balancer Controller webhook
         run: |
-          kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
-          kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=600s
-        timeout-minutes: 12
+           kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
+           kubectl -n kube-system wait --for=condition=Available deployment/aws-load-balancer-controller --timeout=600s
+           kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide
+                    timeout-minutes: 12
 
       - name: Dump AWS Load Balancer Controller diagnostics
         if: failure()
@@ -246,16 +247,22 @@ jobs:
 
       - name: Install Argo Rollouts
         run: |
+          set -euo pipefail
+          ARGO_ROLLOUTS_VERSION=v1.8.3
           kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
-          kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+          kubectl apply -n argo-rollouts -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml"
           kubectl -n argo-rollouts rollout status deployment/argo-rollouts --timeout=600s
+
 
       - name: Install kubectl argo rollouts plugin
         run: |
-          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          set -euo pipefail
+          ARGO_ROLLOUTS_VERSION=v1.8.3
+          curl -LO "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/kubectl-argo-rollouts-linux-amd64"
           chmod +x ./kubectl-argo-rollouts-linux-amd64
           sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
           kubectl argo rollouts version
+
 
 
       - name: Install Prometheus + Grafana
@@ -303,7 +310,8 @@ jobs:
           fi
           kubectl -n kube-system rollout restart deployment/aws-load-balancer-controller
           kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
-          kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=600s
+          kubectl -n kube-system wait --for=condition=Available deployment/aws-load-balancer-controller --timeout=600s
+          kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide
           kubectl -n kube-system get sa aws-load-balancer-controller -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
           echo
 
