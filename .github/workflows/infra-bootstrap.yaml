@@ -309,16 +309,30 @@ jobs:
 
       - name: Deploy Petclinic workloads
         run: |
+          set -euo pipefail
           if kubectl get namespace petclinic >/dev/null 2>&1; then
+            TERMINATING=0
             for i in {1..60}; do
               PHASE=$(kubectl get namespace petclinic -o jsonpath='{.status.phase}' 2>/dev/null || true)
               if [ "$PHASE" != "Terminating" ]; then
                 break
               fi
+              TERMINATING=1
               echo "petclinic namespace is still terminating; waiting..."
               sleep 5
             done
+
+            PHASE=$(kubectl get namespace petclinic -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$PHASE" = "Terminating" ]; then
+              echo "petclinic namespace is stuck terminating; forcing finalization."
+              kubectl get namespace petclinic -o json \
+                | jq '.spec.finalizers = []' \
+                | kubectl replace --raw "/api/v1/namespaces/petclinic/finalize" -f -
+              kubectl wait --for=delete namespace/petclinic --timeout=180s || true
+            fi
           fi
+
+          test -f kubernetes/mysql/mysql-secret.yaml
           kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
           kubectl apply -f kubernetes/mysql/mysql-secret.yaml
