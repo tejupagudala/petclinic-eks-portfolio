@@ -1,0 +1,79 @@
+name: eks-upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type UPGRADE to continue"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upgrade:
+    if: github.event.inputs.confirm == 'UPGRADE'
+    runs-on: ubuntu-latest
+    environment: eks-upgrade
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Validate target version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ secrets.EKS_CLUSTER_NAME }}"
+          REGION="${{ secrets.AWS_REGION }}"
+          TARGET="${{ vars.EKS_ALLOWED_VERSION }}"
+
+          CURRENT=$(aws eks describe-cluster \
+            --name "$CLUSTER" \
+            --region "$REGION" \
+            --query 'cluster.version' \
+            --output text)
+
+          TARGET_STATUS=$(aws eks describe-cluster-versions \
+            --region "$REGION" \
+            --cluster-versions "$TARGET" \
+            --include-all \
+            --query 'clusterVersions[0].versionStatus' \
+            --output text)
+
+          if [ "$TARGET_STATUS" != "STANDARD_SUPPORT" ]; then
+            echo "Approved target $TARGET is not in standard support"
+            exit 1
+          fi
+
+          if [ "$CURRENT" = "$TARGET" ]; then
+            echo "Cluster already on target version $TARGET"
+            exit 0
+          fi
+
+      - name: Set policy to STANDARD before upgrade
+        run: |
+          aws eks update-cluster-config \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --upgrade-policy supportType=STANDARD
+
+          aws eks wait cluster-active \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Upgrade EKS control plane
+        run: |
+          aws eks update-cluster-version \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --kubernetes-version "${{ vars.EKS_ALLOWED_VERSION }}"
+
+          aws eks wait cluster-active \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
