@@ -15,7 +15,7 @@ permissions:
 jobs:
   destroy:
     if: github.event.inputs.confirm == 'DESTROY'
-    runs-on: [self-hosted, linux, aws-vpc]
+    runs-on: ubuntu-latest
     env:
       TF_VAR_github_org: ${{ vars.REPO_ORG }}
       TF_VAR_github_repo: ${{ vars.REPO_NAME }}
