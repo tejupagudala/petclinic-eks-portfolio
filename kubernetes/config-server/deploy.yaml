@@ -28,16 +28,14 @@ spec:
             - name: SERVER_PORT
               value: "8888"
           readinessProbe:
-            httpGet:
-              path: /actuator/health
+            tcpSocket:
               port: http
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
-            httpGet:
-              path: /actuator/health
+            tcpSocket:
               port: http
             initialDelaySeconds: 40
             periodSeconds: 20

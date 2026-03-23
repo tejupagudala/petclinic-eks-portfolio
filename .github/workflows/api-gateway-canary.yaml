@@ -1,0 +1,167 @@
+name: api-gateway-canary
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "kubernetes/api-gateway/**"
+      - ".github/workflows/api-gateway-canary.yaml"
+
+concurrency:
+  group: api-gateway-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-canary:
+    runs-on: [self-hosted, linux, aws-vpc]
+    outputs:
+      alb_hostname: ${{ steps.alb.outputs.hostname }}
+    steps:
+      - name: Checkout merged main commit
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install kubectl argo rollouts plugin
+        run: |
+          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x ./kubectl-argo-rollouts-linux-amd64
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --kubeconfig "$KUBECONFIG"
+
+      - name: Apply api-gateway manifests
+        run: |
+          set -euo pipefail
+          kubectl apply -f kubernetes/api-gateway/
+
+      - name: Wait for rollout to reach canary pause
+        run: |
+          set -euo pipefail
+
+          for i in {1..60}; do
+            REASON=$(kubectl get rollout api-gateway -n petclinic -o jsonpath='{.status.pauseConditions[0].reason}' 2>/dev/null || true)
+            if [ "$REASON" = "CanaryPauseStep" ]; then
+              echo "Rollout is paused at the canary step."
+              break
+            fi
+            sleep 10
+          done
+
+          test "${REASON:-}" = "CanaryPauseStep"
+          kubectl argo rollouts get rollout api-gateway -n petclinic
+
+      - name: Smoke test canary service inside cluster
+        run: |
+          set -euo pipefail
+          kubectl -n petclinic run canary-smoke-${GITHUB_RUN_ID} \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c '
+              set -e
+              curl -fsS http://api-gateway-canary:8080/actuator/health
+              curl -fsS http://api-gateway-canary:8080/api/customer/owners >/dev/null
+            '
+
+      - name: Capture ALB hostname
+        id: alb
+        run: |
+          echo "hostname=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >> "$GITHUB_OUTPUT"
+
+  promote:
+    needs: deploy-canary
+    if: needs.deploy-canary.result == 'success'
+    runs-on: [self-hosted, linux, aws-vpc]
+    environment:
+      name: production
+      url: http://${{ needs.deploy-canary.outputs.alb_hostname }}
+    steps:
+      - name: Checkout merged main commit
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install kubectl argo rollouts plugin
+        run: |
+          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x ./kubectl-argo-rollouts-linux-amd64
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --kubeconfig "$KUBECONFIG"
+
+      - name: Promote canary to full rollout
+        run: |
+          set -euo pipefail
+          kubectl argo rollouts promote api-gateway -n petclinic
+          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
+
+  rollback:
+    needs: [deploy-canary, promote]
+    if: ${{ always() && needs.deploy-canary.result == 'success' && needs.promote.result != 'success' }}
+    runs-on: [self-hosted, linux, aws-vpc]
+    steps:
+      - name: Checkout merged main commit
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install kubectl argo rollouts plugin
+        run: |
+          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x ./kubectl-argo-rollouts-linux-amd64
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --kubeconfig "$KUBECONFIG"
+
+      - name: Roll back to previous stable revision
+        run: |
+          set -euo pipefail
+          kubectl argo rollouts abort api-gateway -n petclinic || true
+          kubectl argo rollouts undo api-gateway -n petclinic
+          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s

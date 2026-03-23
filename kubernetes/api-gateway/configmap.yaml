@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: petclinic
+data:
+  application.yml: |
+    server:
+      port: 8080
+
+    spring:
+      application:
+        name: api-gateway
+      profiles:
+        active: k8s
+      cloud:
+        config:
+          enabled: false
+          import-check:
+            enabled: false
+        gateway:
+          server:
+            webflux:
+              routes:
+                - id: customers-service
+                  uri: http://customers-service.petclinic.svc.cluster.local:8081
+                  predicates:
+                    - Path=/api/customer/**
+                  filters:
+                    - RewritePath=/api/customer/?(?<segment>.*), /$\{segment}
+
+                - id: vets-service
+                  uri: http://vets-service.petclinic.svc.cluster.local:8083
+                  predicates:
+                    - Path=/api/vet/**
+                  filters:
+                    - RewritePath=/api/vet/?(?<segment>.*), /$\{segment}
+
+                - id: visits-service
+                  uri: http://visits-service.petclinic.svc.cluster.local:8082
+                  predicates:
+                    - Path=/api/visit/**
+                  filters:
+                    - RewritePath=/api/visit/?(?<segment>.*), /$\{segment}
+
+    eureka:
+      client:
+        enabled: false
+
+    management:
+      endpoint:
+        gateway:
+          access: unrestricted
+      endpoints:
+        web:
+          exposure:
+            include: health,info,prometheus,gateway,mappings

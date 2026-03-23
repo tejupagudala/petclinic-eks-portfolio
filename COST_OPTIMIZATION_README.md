@@ -10,7 +10,7 @@ We implemented this cost-optimization plan after discovering unexpected EKS bill
 
 ### Terraform (`terraform/cost_guardrails.tf`)
 - Added `aws_sns_topic.cost_alerts` and `aws_sns_topic_subscription.cost_email`.
-  - Purpose: send daily cost alerts to Gmail when the workflow flags a threshold breach.
+  - Purpose: send cost alerts to Gmail.
 - Added monthly total budget (`aws_budgets_budget.monthly_total`).
   - Purpose: alert at 50%, 80% forecast, and 100% actual spend.
 - Added per-service budgets (`aws_budgets_budget.service_budgets`) for:
@@ -59,7 +59,7 @@ We implemented this cost-optimization plan after discovering unexpected EKS bill
     - `cost-report.txt`
     - `by-service.json`
     - `by-usage-type.json`
-  - Sends an SNS email alert when the daily total exceeds `DAILY_COST_LIMIT_USD` or risky usage types are detected.
+  - Emails report via SNS to Gmail.
   - Fails run when daily cost limit is exceeded or risky usage types detected.
 - `.github/workflows/non-prod-stop.yaml`
   - Night schedule + manual trigger.
@@ -110,7 +110,7 @@ Important:
 - Check Gmail for AWS SNS subscription email.
 - Click **Confirm subscription**.
 
-If not confirmed, daily alert emails will not arrive.
+If not confirmed, daily emails will not arrive.
 
 ## Step 3: Get values for GitHub Secrets
 
@@ -145,7 +145,7 @@ Add:
     - `cost-report.txt`
     - `by-service.json`
     - `by-usage-type.json`
-  - Gmail receives `AWS Daily Cost Alert` when the daily report exceeds the configured limit
+  - Gmail receives `AWS Daily Cost Report`
 
 ## Step 6: Validate stop/start workflows
 
@@ -261,8 +261,7 @@ Note: if backend S3/DynamoDB state-lock infrastructure is intentionally kept, ti
 - [ ] Terraform apply succeeded from `terraform/`
 - [ ] SNS email subscription confirmed in Gmail
 - [ ] GitHub secrets set correctly
-- [ ] `cost-report-daily` workflow creates artifact
-- [ ] `cost-report-daily` sends Gmail alert when daily usage exceeds the configured limit
+- [ ] `cost-report-daily` workflow creates artifact + Gmail email
 - [ ] `non-prod-stop` sets desired nodes to 0
 - [ ] `non-prod-start` sets desired nodes to 2
 - [ ] EKS version/support status verified

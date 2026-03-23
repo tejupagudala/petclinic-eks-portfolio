@@ -1,0 +1,69 @@
+name: nonprod-stop
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  stop-nodegroup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run only at 11 PM America/Chicago
+        id: timegate
+        run: |
+          HOUR=$(TZ=America/Chicago date +%H)
+          if [ "$HOUR" = "23" ]; then 
+          echo "run=true" >> "$GITHUB_OUTPUT"; 
+          else 
+          echo "run=false" >> "$GITHUB_OUTPUT"; 
+          echo "Not 11 PM Chicago; skipping."
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.timegate.outputs.run == 'true'
+        id: creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Preflight infra check
+        if: steps.timegate.outputs.run == 'true' && steps.creds.outcome == 'success'
+        id: preflight
+        shell: bash
+        run: |
+            set +e
+
+
+            aws eks describe-cluster \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1 || { echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+            aws eks describe-nodegroup \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1 || { echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            
+
+
+
+      - name: Scale nodegroup down to zero
+        if: steps.timegate.outputs.run == 'true' && steps.preflight.outputs.ready == 'true'
+        run: |
+          aws eks update-nodegroup-config \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}" \
+            --scaling-config minSize=0,maxSize=2,desiredSize=0
+
+          aws eks wait nodegroup-active \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}"

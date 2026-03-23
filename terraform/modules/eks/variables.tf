@@ -18,6 +18,24 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "public_endpoint_enabled" {
+  description = "Whether the EKS public endpoint is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to access the public EKS endpoint (ignored if public endpoint disabled)"
+  type        = list(string)
+  default     = []
+}
+
+variable "tags" {
+  description = "Common tags"
+  type        = map(string)
+  default     = {}
+}
+
 variable "node_groups" {
   description = "EKS node group configuration"
   type = map(object({

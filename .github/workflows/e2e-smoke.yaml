@@ -52,6 +52,6 @@ jobs:
 
       - name: Smoke API checks
         run: |
-          curl -fsS "http://${ALB}/api/customer/owners" >/dev/null
-          curl -fsS "http://${ALB}/api/vet/vets" >/dev/null
-          curl -fsS "http://${ALB}/api/visit/owners/1/pets/1/visits" >/dev/null
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/customer/owners" >/dev/null
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/vet/vets" >/dev/null
+          curl -fsS -H "Host: petclinic.local" "http://${ALB}/api/visit/owners/1/pets/1/visits" >/dev/null

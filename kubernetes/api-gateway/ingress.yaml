@@ -9,8 +9,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-    - host: example.com
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -18,4 +17,4 @@ spec:
               service:
                 name: api-gateway
                 port:
-                  number: 8080
+                  name: use-annotation

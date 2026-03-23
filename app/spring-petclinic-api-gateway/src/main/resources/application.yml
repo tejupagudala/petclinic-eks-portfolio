@@ -1,52 +1,53 @@
+server:
+  port: ${SERVER_PORT:8080}
+
 spring:
   application:
     name: api-gateway
-  config:
-    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888/}
   cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
     gateway:
       server:
         webflux:
-          default-filters:
-            - name: CircuitBreaker
-              args:
-                name: defaultCircuitBreaker
-                fallbackUri: forward:/fallback
-            - name: Retry
-              args:
-                retries: 1
-                statuses: SERVICE_UNAVAILABLE
-                methods: POST
           routes:
+            - id: customers-service
+              uri: ${CUSTOMERS_SERVICE_URL}
+              predicates:
+                - Path=/api/customer/**
+              filters:
+                - StripPrefix=2
             - id: vets-service
-              uri: lb://vets-service
+              uri: ${VETS_SERVICE_URL}
               predicates:
                 - Path=/api/vet/**
               filters:
                 - StripPrefix=2
             - id: visits-service
-              uri: lb://visits-service
+              uri: ${VISITS_SERVICE_URL}
               predicates:
                 - Path=/api/visit/**
               filters:
                 - StripPrefix=2
-            - id: customers-service
-              uri: lb://customers-service
-              predicates:
-                - Path=/api/customer/**
-              filters:
-                - StripPrefix=2
             - id: genai-service
-              uri: lb://genai-service
+              uri: ${GENAI_SERVICE_URL}
               predicates:
                 - Path=/api/genai/**
               filters:
                 - StripPrefix=2
-                - CircuitBreaker=name=genaiCircuitBreaker,fallbackUri=/fallback
 
----
-spring:
-  config:
-    activate:
-      on-profile: docker
-    import: configserver:http://config-server:8888
+
+eureka:
+  client:
+    enabled: false
+
+management:
+  endpoint:
+    gateway:
+      access: unrestricted
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway,mappings

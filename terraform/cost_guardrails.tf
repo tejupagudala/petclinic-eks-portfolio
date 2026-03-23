@@ -1,0 +1,419 @@
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+
+locals {
+  budget_notifications = [
+    { threshold = 50, type = "ACTUAL" },
+    { threshold = 80, type = "FORECASTED" },
+    { threshold = 100, type = "ACTUAL" }
+  ]
+
+  service_budgets = {
+    eks       = { service = "Amazon Elastic Container Service for Kubernetes", limit = var.eks_budget_limit_usd }
+    ec2_other = { service = "EC2 - Other", limit = var.ec2_other_budget_limit_usd }
+    vpc       = { service = "Amazon Virtual Private Cloud", limit = var.vpc_budget_limit_usd }
+    elb       = { service = "Amazon Elastic Load Balancing", limit = var.elb_budget_limit_usd }
+  }
+
+  budget_arns = concat(
+    [
+      "arn:${data.aws_partition.current.partition}:budgets::${data.aws_caller_identity.current.account_id}:budget/${var.cluster_name}-monthly-total"
+    ],
+    [
+      for budget_name, _ in local.service_budgets :
+      "arn:${data.aws_partition.current.partition}:budgets::${data.aws_caller_identity.current.account_id}:budget/${var.cluster_name}-${budget_name}-monthly"
+    ]
+  )
+
+  eks_cluster_arn           = "arn:${data.aws_partition.current.partition}:eks:${var.region}:${data.aws_caller_identity.current.account_id}:cluster/${var.cluster_name}"
+  eks_nodegroup_arn_pattern = "arn:${data.aws_partition.current.partition}:eks:${var.region}:${data.aws_caller_identity.current.account_id}:nodegroup/${var.cluster_name}/*/*"
+}
+
+data "aws_iam_policy_document" "cost_alerts_kms" {
+  statement {
+    sid    = "AllowRootAccountAdmin"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AllowSNSServiceUseKey"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["sns.amazonaws.com"]
+    }
+
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey"
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
+resource "aws_kms_key" "cost_alerts" {
+  description             = "KMS key for cost alert SNS topic encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+  policy                  = data.aws_iam_policy_document.cost_alerts_kms.json
+  tags                    = var.default_tags
+}
+
+resource "aws_kms_alias" "cost_alerts" {
+  name          = "alias/${var.cluster_name}-cost-alerts"
+  target_key_id = aws_kms_key.cost_alerts.key_id
+}
+
+resource "aws_sns_topic" "cost_alerts" {
+  name              = "${var.cluster_name}-cost-alerts"
+  kms_master_key_id = aws_kms_key.cost_alerts.arn
+}
+
+resource "aws_sns_topic_subscription" "cost_email" {
+  topic_arn = aws_sns_topic.cost_alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_budgets_budget" "monthly_total" {
+  name         = "${var.cluster_name}-monthly-total"
+  budget_type  = "COST"
+  limit_amount = var.monthly_budget_limit_usd
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  dynamic "notification" {
+    for_each = local.budget_notifications
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value.threshold
+      threshold_type             = "PERCENTAGE"
+      notification_type          = notification.value.type
+      subscriber_email_addresses = [var.alert_email]
+      subscriber_sns_topic_arns  = [aws_sns_topic.cost_alerts.arn]
+    }
+  }
+}
+
+resource "aws_budgets_budget" "service_budgets" {
+  for_each = local.service_budgets
+
+  name         = "${var.cluster_name}-${each.key}-monthly"
+  budget_type  = "COST"
+  limit_amount = each.value.limit
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  cost_filter {
+    name   = "Service"
+    values = [each.value.service]
+  }
+
+  dynamic "notification" {
+    for_each = local.budget_notifications
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value.threshold
+      threshold_type             = "PERCENTAGE"
+      notification_type          = notification.value.type
+      subscriber_email_addresses = [var.alert_email]
+      subscriber_sns_topic_arns  = [aws_sns_topic.cost_alerts.arn]
+    }
+  }
+}
+
+data "external" "existing_dimensional_anomaly_monitor" {
+  count = var.enable_cost_anomaly_detection ? 1 : 0
+
+  program = [
+    "bash",
+    "-lc",
+    <<-EOT
+      set -euo pipefail
+      QUERY_DIMENSIONAL="AnomalyMonitors[?MonitorType=='DIMENSIONAL']|[0].MonitorArn"
+      QUERY_FIRST="AnomalyMonitors[0].MonitorArn"
+      PROFILE="${var.profile_name}"
+
+      ARN="$(aws ce get-anomaly-monitors --query "$QUERY_DIMENSIONAL" --output text 2>/dev/null || true)"
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        if [ -n "$PROFILE" ]; then
+          ARN="$(aws --profile "$PROFILE" ce get-anomaly-monitors --query "$QUERY_DIMENSIONAL" --output text 2>/dev/null || true)"
+        fi
+      fi
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        ARN="$(aws ce get-anomaly-monitors --query "$QUERY_FIRST" --output text 2>/dev/null || true)"
+      fi
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        if [ -n "$PROFILE" ]; then
+          ARN="$(aws --profile "$PROFILE" ce get-anomaly-monitors --query "$QUERY_FIRST" --output text 2>/dev/null || true)"
+        fi
+      fi
+
+      if [ -z "$ARN" ] || [ "$ARN" = "None" ]; then
+        printf '{"arn":""}\n'
+      else
+        printf '{"arn":"%s"}\n' "$ARN"
+      fi
+    EOT
+  ]
+}
+
+locals {
+  anomaly_detection_enabled      = var.enable_cost_anomaly_detection
+  discovered_service_monitor_arn = local.anomaly_detection_enabled ? try(data.external.existing_dimensional_anomaly_monitor[0].result.arn, "") : ""
+  requested_service_monitor_arn  = trimspace(var.existing_anomaly_monitor_arn)
+  effective_service_monitor_arn  = local.requested_service_monitor_arn != "" ? local.requested_service_monitor_arn : local.discovered_service_monitor_arn
+}
+
+resource "aws_ce_anomaly_monitor" "service_monitor" {
+  count             = local.anomaly_detection_enabled && local.effective_service_monitor_arn == "" ? 1 : 0
+  name              = "${var.cluster_name}-service-anomaly-monitor"
+  monitor_type      = "DIMENSIONAL"
+  monitor_dimension = "SERVICE"
+}
+
+
+locals {
+  service_monitor_arn = local.anomaly_detection_enabled ? (
+    local.effective_service_monitor_arn != "" ? local.effective_service_monitor_arn : aws_ce_anomaly_monitor.service_monitor[0].arn
+  ) : ""
+}
+
+resource "aws_ce_anomaly_subscription" "daily_anomaly" {
+  count            = local.anomaly_detection_enabled ? 1 : 0
+  name             = "${var.cluster_name}-daily-anomaly-subscription"
+  frequency        = "DAILY"
+  monitor_arn_list = [local.service_monitor_arn]
+  threshold_expression {
+    dimension {
+      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+      values        = ["1"]
+      match_options = ["GREATER_THAN_OR_EQUAL"]
+    }
+  }
+
+  subscriber {
+    type    = "EMAIL"
+    address = var.alert_email
+  }
+}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count = var.github_oidc_provider_arn == "" ? 1 : 0
+
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+locals {
+  github_oidc_provider_arn = var.github_oidc_provider_arn != "" ? var.github_oidc_provider_arn : aws_iam_openid_connect_provider.github[0].arn
+}
+
+data "aws_iam_policy_document" "github_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_org}/${var.github_repo}:ref:refs/heads/${var.github_branch}"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions_cost_ops" {
+  name               = "${var.cluster_name}-gha-cost-ops-role"
+  assume_role_policy = data.aws_iam_policy_document.github_assume_role.json
+  tags               = var.default_tags
+}
+
+data "aws_iam_policy_document" "github_actions_cost_ops" {
+  # trivy:ignore:AVD-AWS-0057
+  # Cost Explorer API used by the daily report does not support resource-level permissions and requires "*".
+  statement {
+    sid = "CostExplorerRead"
+    actions = [
+      "ce:GetCostAndUsage"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "BudgetsRead"
+    actions = [
+      "budgets:ViewBudget",
+      "budgets:DescribeBudget",
+      "budgets:DescribeBudgetPerformanceHistory",
+      "budgets:DescribeBudgetAction",
+      "budgets:DescribeBudgetActionHistories",
+      "budgets:DescribeBudgetActionsForAccount",
+      "budgets:DescribeBudgetActionsForBudget",
+      "budgets:DescribeBudgetNotificationsForAccount",
+      "budgets:DescribeBudgets"
+    ]
+    resources = local.budget_arns
+  }
+
+  statement {
+    sid       = "SnsPublish"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.cost_alerts.arn]
+  }
+
+  statement {
+    sid = "EksScaleNodegroup"
+    actions = [
+      "eks:DescribeCluster",
+      "eks:DescribeNodegroup",
+      "eks:ListNodegroups",
+      "eks:UpdateNodegroupConfig"
+    ]
+    resources = [
+      local.eks_cluster_arn,
+      local.eks_nodegroup_arn_pattern
+    ]
+  }
+
+  statement {
+    sid = "RunnerEc2StartStopTagged"
+    actions = [
+      "ec2:StartInstances",
+      "ec2:StopInstances"
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:instance/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Role"
+      values   = ["github-self-hosted-runner"]
+    }
+  }
+
+  statement {
+    sid = "RunnerEc2Describe"
+    actions = [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "github_actions_cost_ops" {
+  name   = "${var.cluster_name}-gha-cost-ops-policy"
+  policy = data.aws_iam_policy_document.github_actions_cost_ops.json
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_cost_ops" {
+  role       = aws_iam_role.github_actions_cost_ops.name
+  policy_arn = aws_iam_policy.github_actions_cost_ops.arn
+}
+
+# resource "aws_s3_bucket" "cur" {
+#   bucket        = "${var.cluster_name}-${data.aws_caller_identity.current.account_id}-cur"
+#   force_destroy = true
+#   tags          = var.default_tags
+# }
+
+# resource "aws_s3_bucket_public_access_block" "cur" {
+#   bucket                  = aws_s3_bucket.cur.id
+#   block_public_acls       = true
+#   block_public_policy     = true
+#   ignore_public_acls      = true
+#   restrict_public_buckets = true
+# }
+
+# data "aws_iam_policy_document" "cur_bucket_policy" {
+#   statement {
+#     sid = "AllowCURDelivery"
+#     principals {
+#       type        = "Service"
+#       identifiers = ["billingreports.amazonaws.com"]
+#     }
+
+#     actions = ["s3:GetBucketAcl", "s3:GetBucketPolicy", "s3:PutObject"]
+#     resources = [
+#       aws_s3_bucket.cur.arn,
+#       "${aws_s3_bucket.cur.arn}/*"
+#     ]
+
+#     condition {
+#       test     = "StringEquals"
+#       variable = "aws:SourceAccount"
+#       values   = [data.aws_caller_identity.current.account_id]
+#     }
+
+#     #     condition {
+#     #   test     = "StringLike"
+#     #   variable = "aws:SourceArn"
+#     #   values   = ["arn:${data.aws_partition.current.partition}:cur:us-east-1:${data.aws_caller_identity.current.account_id}:definition/*"]
+#     # }
+#   }
+# }
+
+# resource "aws_s3_bucket_policy" "cur" {
+#   bucket = aws_s3_bucket.cur.id
+#   policy = data.aws_iam_policy_document.cur_bucket_policy.json
+# }
+
+# resource "aws_cur_report_definition" "cur_daily" {
+#   report_name                = "${var.cluster_name}-daily-cur"
+#   time_unit                  = "DAILY"
+#   format                     = "Parquet"
+#   compression                = "Parquet"
+#   additional_schema_elements = ["RESOURCES"]
+#   s3_bucket                  = aws_s3_bucket.cur.id
+#   s3_region                  = var.region
+#   s3_prefix                  = "cur"
+#   additional_artifacts       = ["ATHENA"]
+#   report_versioning          = "OVERWRITE_REPORT"
+#   refresh_closed_reports     = true
+
+#   depends_on = [aws_s3_bucket_policy.cur]
+# }
+
+# resource "aws_athena_workgroup" "cost" {
+#   name = "${var.cluster_name}-cost-wg"
+
+#   configuration {
+#     result_configuration {
+#       output_location = "s3://${aws_s3_bucket.cur.bucket}/athena-results/"
+#     }
+#   }
+
+#   tags = var.default_tags
+# }

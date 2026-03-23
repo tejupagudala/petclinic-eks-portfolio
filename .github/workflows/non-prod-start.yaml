@@ -1,0 +1,66 @@
+name: nonprod-start
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  start-nodegroup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run only at 8 AM America/Chicago
+        run: |
+          HOUR=$(TZ=America/Chicago date +%H)
+          if [ "$HOUR" != "08" ]; then
+            echo "Not 8 AM Chicago; exiting."
+            exit 0
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        id: creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Preflight infra check
+        if: steps.creds.outcome == 'success'
+        id: preflight
+        shell: bash
+        run: |
+            set +e
+            if [ "${{ steps.creds.outcome }}" != "success" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+            fi
+            aws eks describe-cluster \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1 || { echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+            aws eks describe-nodegroup \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1 || { echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+
+
+
+      - name: Scale nodegroup up
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          aws eks update-nodegroup-config \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}" \
+            --scaling-config minSize=0,maxSize=2,desiredSize=2
+
+          aws eks wait nodegroup-active \
+            --cluster-name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --nodegroup-name "${{ secrets.EKS_NODEGROUP_NAME }}"

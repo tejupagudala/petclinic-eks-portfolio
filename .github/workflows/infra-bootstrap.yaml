@@ -1,0 +1,460 @@
+name: infra-bootstrap
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  prepare-runner:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_github_oidc_provider_arn: ${{ vars.AWS_GHA_OIDC_PROVIDER_ARN }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_enable_cost_anomaly_detection: "false"
+      TF_VAR_existing_anomaly_monitor_arn: ""
+      TF_VAR_aws_auth_role_arns: '[]'
+      TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Create or refresh self-hosted runner EC2
+        run: |
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false \
+            -target=module.vpc.aws_vpc.main \
+            -target=module.vpc.aws_subnet.public \
+            -target=module.vpc.aws_internet_gateway.main \
+            -target=module.vpc.aws_route_table.public \
+            -target=module.vpc.aws_route_table_association.public \
+            -target=aws_security_group.github_runner \
+            -target=aws_iam_role.github_runner_ec2 \
+            -target=aws_iam_role_policy_attachment.github_runner_ssm \
+            -target=aws_iam_role_policy.github_runner_ssm_param \
+            -target=aws_iam_instance_profile.github_runner \
+            -target=aws_instance.github_runner
+
+      - name: Ensure self-hosted runner EC2 is running
+        run: |
+          set -euo pipefail
+
+          CLUSTER_NAME="$(terraform -chdir=terraform output -raw cluster_name 2>/dev/null || true)"
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          fi
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="demo-eks-cluster"
+          fi
+
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --region "$AWS_REGION" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Runner instance not found after targeted Terraform apply (tag Name=${CLUSTER_NAME}-github-runner)."
+            exit 1
+          fi
+
+          STATE=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query "Reservations[0].Instances[0].State.Name" --output text)
+
+          if [ "$STATE" = "stopped" ] || [ "$STATE" = "stopping" ]; then
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          fi
+
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+          sleep 60
+
+  bootstrap:
+    needs: [prepare-runner]
+    runs-on: [self-hosted, linux, aws-vpc]
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_github_oidc_provider_arn: ${{ vars.AWS_GHA_OIDC_PROVIDER_ARN }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_enable_cost_anomaly_detection: "false"
+      TF_VAR_existing_anomaly_monitor_arn: ""
+      TF_VAR_aws_auth_role_arns: '[]'
+      TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Confirm self-hosted runner EC2 is healthy
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name 2>/dev/null || true)
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          fi
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="demo-eks-cluster"
+          fi
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters Name=tag:Name,Values="${CLUSTER_NAME}-github-runner" Name=instance-state-name,Values=pending,running,stopping,stopped \
+            --region "$AWS_REGION" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Runner instance not found before bootstrap."
+            exit 1
+          fi
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
+
+      - name: Terraform init/apply
+        run: |
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false
+
+      - name: Install tooling
+        run: |
+          KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+          curl -sSL https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz | tar xz
+          sudo mv eksctl /usr/local/bin/
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          mkdir -p "$(dirname "$KUBECONFIG")"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
+          aws sts get-caller-identity
+          kubectl config use-context "arn:aws:eks:${AWS_REGION}:479407618698:cluster/${CLUSTER_NAME}"
+          kubectl auth can-i get pods -A
+          kubectl get ns
+
+      - name: Install AWS Load Balancer Controller
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          timeout 20s kubectl get nodes
+
+          VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+          ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
+          kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
+          helm repo add eks https://aws.github.io/eks-charts
+          timeout 120s helm repo update
+
+          STATUS="$(helm -n kube-system status aws-load-balancer-controller 2>/dev/null | awk '/^STATUS:/{print $2}' || true)"
+          if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
+            echo "Found pending Helm release state: $STATUS. Attempting rollback."
+            if helm -n kube-system history aws-load-balancer-controller >/dev/null 2>&1; then
+              helm -n kube-system rollback aws-load-balancer-controller || helm -n kube-system uninstall aws-load-balancer-controller
+            else
+              helm -n kube-system uninstall aws-load-balancer-controller
+            fi
+          fi
+          STATUS="$(helm -n kube-system status aws-load-balancer-controller 2>/dev/null | awk '/^STATUS:/{print $2}' || true)"
+          if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
+            echo "Release still pending after rollback. Uninstalling for a clean install."
+            helm -n kube-system uninstall aws-load-balancer-controller || true
+          fi
+          echo "Starting Helm upgrade/install for aws-load-balancer-controller"
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            -n kube-system \
+            --set clusterName="$CLUSTER_NAME" \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set region="$AWS_REGION" \
+            --set vpcId="$VPC_ID" \
+            --wait \
+            --timeout 5m \
+            --debug \
+            --wait-for-jobs \
+            --history-max 5
+
+      - name: Diagnose AWS Load Balancer Controller install
+        if: failure()
+        run: |
+          echo "=== helm list (kube-system) ==="
+          helm -n kube-system list || true
+          echo "=== helm status aws-load-balancer-controller ==="
+          helm -n kube-system status aws-load-balancer-controller || true
+          echo "=== kube-system deployments/services ==="
+          kubectl -n kube-system get deploy,rs,svc || true
+          echo "=== kube-system events (last 200) ==="
+          kubectl -n kube-system get events --sort-by=.lastTimestamp | tail -n 200 || true
+
+      - name: Wait for AWS Load Balancer Controller webhook
+        run: |
+           kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
+           kubectl -n kube-system wait --for=condition=Available deployment/aws-load-balancer-controller --timeout=600s
+           kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide
+        timeout-minutes: 12
+
+      - name: Dump AWS Load Balancer Controller diagnostics
+        if: failure()
+        run: |
+          echo "=== aws-load-balancer-controller pods ==="
+          kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide || true
+          echo "=== aws-load-balancer-controller describe ==="
+          kubectl -n kube-system describe pods -l app.kubernetes.io/name=aws-load-balancer-controller || true
+          echo "=== aws-load-balancer-controller logs ==="
+          kubectl -n kube-system logs -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200 || true
+
+      - name: Install Argo CD
+        continue-on-error: true
+        run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          helm upgrade --install argocd argo/argo-cd \
+            -n argocd --create-namespace \
+            --set configs.params.server.insecure=true
+
+      - name: Install Argo Rollouts
+        run: |
+          set -euo pipefail
+          ARGO_ROLLOUTS_VERSION=v1.8.3
+          kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -n argo-rollouts -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml"
+          kubectl -n argo-rollouts rollout status deployment/argo-rollouts --timeout=600s
+
+
+      - name: Install kubectl argo rollouts plugin
+        run: |
+          set -euo pipefail
+          ARGO_ROLLOUTS_VERSION=v1.8.3
+          curl -LO "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/kubectl-argo-rollouts-linux-amd64"
+          chmod +x ./kubectl-argo-rollouts-linux-amd64
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+
+
+      - name: Install Prometheus + Grafana
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+          ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
+          if ! kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook >/dev/null 2>&1; then
+            echo "ALB webhook missing; restarting controller to recreate."
+            kubectl -n kube-system rollout restart deploy/aws-load-balancer-controller
+            kubectl -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=300s
+          else
+            CABUNDLE_LEN=$(kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | wc -c | tr -d ' ')
+            if [ "${CABUNDLE_LEN}" -lt 20 ]; then
+              echo "ALB webhook CA bundle looks invalid; re-installing controller to regenerate certs."
+              kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+              kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
+              helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+                -n kube-system \
+                --set clusterName="$CLUSTER_NAME" \
+                --set serviceAccount.create=false \
+                --set serviceAccount.name=aws-load-balancer-controller \
+                --set region="$AWS_REGION" \
+                --set vpcId="$VPC_ID" \
+                --wait \
+                --timeout 5m
+            fi
+          fi
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            -n monitoring --create-namespace
+
+      - name: Verify AWS Load Balancer Controller IRSA
+        run: |
+          set -euo pipefail
+          ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
+          CURRENT_ARN=$(kubectl -n kube-system get sa aws-load-balancer-controller -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}' 2>/dev/null || true)
+          if [ "$CURRENT_ARN" != "$ALB_ROLE_ARN" ]; then
+            echo "Repairing ALB controller service account annotation."
+            kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
+          fi
+          kubectl -n kube-system rollout restart deployment/aws-load-balancer-controller
+          kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
+          kubectl -n kube-system wait --for=condition=Available deployment/aws-load-balancer-controller --timeout=600s
+          kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller -o wide
+          kubectl -n kube-system get sa aws-load-balancer-controller -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+          echo
+
+      - name: Validate AWS Load Balancer Controller webhook TLS
+        run: |
+          set -euo pipefail
+          TMP_MANIFEST="$RUNNER_TEMP/webhook-smoke-service.yaml"
+          cat > "$TMP_MANIFEST" <<'EOF'
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: webhook-smoke
+            namespace: default
+          spec:
+            type: ClusterIP
+            selector:
+              app: webhook-smoke
+            ports:
+              - port: 80
+                targetPort: 80
+          EOF
+
+          if ! kubectl apply --dry-run=server -f "$TMP_MANIFEST" >/dev/null 2>&1; then
+            echo "ALB webhook dry-run failed; reinstalling controller."
+            CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+            VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+            ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
+            kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
+            kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
+            kubectl -n kube-system delete secret aws-load-balancer-tls --ignore-not-found
+            kubectl -n kube-system delete service aws-load-balancer-webhook-service --ignore-not-found
+            kubectl -n kube-system delete deployment aws-load-balancer-controller --ignore-not-found
+            kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
+            helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+              -n kube-system \
+              --set clusterName="$CLUSTER_NAME" \
+              --set serviceAccount.create=false \
+              --set serviceAccount.name=aws-load-balancer-controller \
+              --set region="$AWS_REGION" \
+              --set vpcId="$VPC_ID" \
+              --wait \
+              --timeout 5m
+            kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s
+            kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=600s
+
+            kubectl apply --dry-run=server -f "$TMP_MANIFEST" >/dev/null
+          fi
+
+      - name: Deploy Petclinic workloads
+        run: |
+          set -euo pipefail
+          if kubectl get namespace petclinic >/dev/null 2>&1; then
+            TERMINATING=0
+            for i in {1..60}; do
+              PHASE=$(kubectl get namespace petclinic -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              if [ "$PHASE" != "Terminating" ]; then
+                break
+              fi
+              TERMINATING=1
+              echo "petclinic namespace is still terminating; waiting..."
+              sleep 5
+            done
+
+            PHASE=$(kubectl get namespace petclinic -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$PHASE" = "Terminating" ]; then
+              echo "petclinic namespace is stuck terminating; forcing finalization."
+              kubectl get namespace petclinic -o json \
+                | jq '.spec.finalizers = []' \
+                | kubectl replace --raw "/api/v1/namespaces/petclinic/finalize" -f -
+              kubectl wait --for=delete namespace/petclinic --timeout=180s || true
+            fi
+          fi
+
+          kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
+          if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
+            kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
+          fi
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: mysql-credentials
+            namespace: petclinic
+          type: Opaque
+          stringData:
+            username: petclinic
+            password: petclinic
+          EOF
+          kubectl apply -f kubernetes/mysql/deploy.yaml
+          kubectl apply -f kubernetes/mysql/service.yaml
+          kubectl apply -f kubernetes/discovery-server/
+          kubectl apply -f kubernetes/config-server/
+          kubectl apply -f kubernetes/customers-service/
+          kubectl apply -f kubernetes/vets-service/
+          kubectl apply -f kubernetes/visits-service/
+          kubectl apply -f kubernetes/api-gateway/
+
+      - name: Refresh AWS credentials before readiness checks
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_INFRA }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Refresh kubeconfig before readiness checks
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
+          kubectl auth can-i get ingress -n petclinic
+
+      - name: Readiness checks
+        run: |
+          set -euo pipefail
+          kubectl -n petclinic rollout status deployment/mysql --timeout=600s
+          kubectl -n petclinic rollout status deployment/discovery-server --timeout=600s
+          kubectl -n petclinic rollout status deployment/config-server --timeout=600s
+          kubectl -n petclinic rollout status deployment/customers-service --timeout=600s
+          kubectl -n petclinic rollout status deployment/vets-service --timeout=600s
+          kubectl -n petclinic rollout status deployment/visits-service --timeout=600s
+          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
+          for i in {1..60}; do
+            ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$ALB" ]; then
+              echo "Petclinic ingress hostname: $ALB"
+              break
+            fi
+            sleep 10
+          done
+          test -n "${ALB}"
+          if kubectl get namespace monitoring >/dev/null 2>&1; then
+            kubectl get pods -n monitoring
+          fi
+          kubectl get pods -n petclinic
+          kubectl get ingress -n petclinic
+
+      - name: Dump app diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get ns || true
+          kubectl -n kube-system get pods,svc || true
+          kubectl -n kube-system logs -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200 || true
+          kubectl -n petclinic get pods,svc,ingress -o wide || true
+          kubectl -n petclinic get events --sort-by=.lastTimestamp | tail -n 200 || true

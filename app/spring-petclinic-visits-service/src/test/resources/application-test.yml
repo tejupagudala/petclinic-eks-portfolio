@@ -2,6 +2,8 @@ spring:
   cloud:
     config:
       enabled: false
+      import-check:
+        enabled: false
   sql:
     init:
       schema-locations: classpath*:db/hsqldb/schema.sql
@@ -9,6 +11,12 @@ spring:
   jpa:
     hibernate:
       ddl-auto: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info,prometheus}
 
 eureka:
   client:

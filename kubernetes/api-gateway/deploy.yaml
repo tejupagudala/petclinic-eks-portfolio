@@ -1,5 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: api-gateway
   namespace: petclinic
@@ -7,85 +7,96 @@ metadata:
     app.kubernetes.io/name: api-gateway
     app.kubernetes.io/part-of: petclinic
 spec:
-  replicas: 1
+  replicas: 2
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  rollbackWindow:
+    revisions: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: api-gateway
+  strategy:
+    canary:
+      stableService: api-gateway-stable
+      canaryService: api-gateway-canary
+      maxSurge: 1
+      maxUnavailable: 0
+      trafficRouting:
+        alb:
+          ingress: frontend-proxyr
+          rootService: api-gateway
+          servicePort: 8080
+      steps:
+        - setWeight: 20
+        - pause: {}
   template:
     metadata:
       labels:
         app.kubernetes.io/name: api-gateway
         app.kubernetes.io/part-of: petclinic
     spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: app-config
+          configMap:
+            name: api-gateway-config
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: api-gateway
-          image: tejupagudala/api-gateway:v3
+          image: tejupagudala/api-gateway:23418219938
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
           ports:
             - name: http
               containerPort: 8080
           env:
-            - name: SERVER_PORT
-              value: "8080"
             - name: SPRING_PROFILES_ACTIVE
-              value: default
+              value: k8s
+            - name: SPRING_CONFIG_LOCATION
+              value: optional:file:/config/application.yml
             - name: SPRING_CLOUD_CONFIG_ENABLED
               value: "false"
-            - name: SPRING_CONFIG_IMPORT
-              value: ""
-            - name: SPRING_CLOUD_DISCOVERY_ENABLED
-              value: "false"
-            - name: SPRING_CLOUD_GATEWAY_DISCOVERY_LOCATOR_ENABLED
+            - name: SPRING_CLOUD_CONFIG_IMPORT_CHECK_ENABLED
               value: "false"
             - name: EUREKA_CLIENT_ENABLED
               value: "false"
-            - name: EUREKA_CLIENT_REGISTER_WITH_EUREKA
-              value: "false"
-            - name: EUREKA_CLIENT_FETCH_REGISTRY
-              value: "false"
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_0_ID
-              value: customers
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_0_URI
-              value: http://customers-service:8081
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_0_PREDICATES_0
-              value: Path=/api/customer/**
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_0_FILTERS_0
-              value: StripPrefix=2
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_1_ID
-              value: vets
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_1_URI
-              value: http://vets-service:8083
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_1_PREDICATES_0
-              value: Path=/api/vet/**
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_1_FILTERS_0
-              value: StripPrefix=2
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_2_ID
-              value: visits
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_2_URI
-              value: http://visits-service:8082
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_2_PREDICATES_0
-              value: Path=/api/visit/**
-            - name: SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES_2_FILTERS_0
-              value: StripPrefix=2
-            - name: SPRING_MAIN_WEB_APPLICATION_TYPE
-              value: reactive
-            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
-              value: "health,info,gateway,mappings"
-            - name: MANAGEMENT_ENDPOINT_GATEWAY_ENABLED
-              value: "true"
-            - name: MANAGEMENT_ENDPOINT_MAPPINGS_ENABLED
-              value: "true"
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: password
+          volumeMounts:
+            - name: app-config
+              mountPath: /config/application.yml
+              subPath: application.yml
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
-            httpGet:
-              path: /actuator/health
+            tcpSocket:
               port: http
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
-            httpGet:
-              path: /actuator/health
+            tcpSocket:
               port: http
             initialDelaySeconds: 40
             periodSeconds: 20

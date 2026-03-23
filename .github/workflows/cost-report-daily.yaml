@@ -21,127 +21,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Check and correct EKS support policy
-        if: steps.creds.outcome == 'success'
-        id: eks
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CLUSTER="${{ secrets.EKS_CLUSTER_NAME }}"
-          REGION="${{ secrets.AWS_REGION }}"
-          ALLOWED_VERSION="${{ vars.EKS_ALLOWED_VERSION }}"
-          ALERT_DAYS="${{ vars.EKS_UPGRADE_ALERT_DAYS || '30' }}"
-
-          CURRENT_VERSION=$(aws eks describe-cluster \
-            --name "$CLUSTER" \
-            --region "$REGION" \
-            --query 'cluster.version' \
-            --output text)
-
-          SUPPORT_TYPE=$(aws eks describe-cluster \
-            --name "$CLUSTER" \
-            --region "$REGION" \
-            --query 'cluster.upgradePolicy.supportType' \
-            --output text)
-
-          VERSION_STATUS=$(aws eks describe-cluster-versions \
-            --region "$REGION" \
-            --cluster-versions "$CURRENT_VERSION" \
-            --include-all \
-            --query 'clusterVersions[0].versionStatus' \
-            --output text)
-
-          EOS_DATE=$(aws eks describe-cluster-versions \
-            --region "$REGION" \
-            --cluster-versions "$CURRENT_VERSION" \
-            --include-all \
-            --query 'clusterVersions[0].endOfStandardSupportDate' \
-            --output text)
-
-          STANDARD_VERSIONS=$(aws eks describe-cluster-versions \
-            --region "$REGION" \
-            --include-all \
-            --query 'clusterVersions[?versionStatus==`STANDARD_SUPPORT`].clusterVersion' \
-            --output text | tr '\t' '\n' | sed '/^$/d' | sort -V)
-
-          NEXT_STANDARD_VERSION=$(printf '%s\n' "$STANDARD_VERSIONS" | awk -v cur="$CURRENT_VERSION" '
-            $0 == cur {found=1; next}
-            found && NF {print; exit}
-          ')
-
-          DAYS_TO_EOS=""
-          if [ -n "$EOS_DATE" ] && [ "$EOS_DATE" != "None" ]; then
-            EOS_EPOCH=$(date -u -d "$EOS_DATE" +%s)
-            NOW_EPOCH=$(date -u +%s)
-            DAYS_TO_EOS=$(( (EOS_EPOCH - NOW_EPOCH) / 86400 ))
-          fi
-
-          AUTO_REVERTED=0
-          ALERT=0
-          FAIL=0
-          CHECK_STATUS="OK"
-
-          if [ "$SUPPORT_TYPE" = "EXTENDED" ] && [ "$VERSION_STATUS" = "STANDARD_SUPPORT" ]; then
-            aws eks update-cluster-config \
-              --name "$CLUSTER" \
-              --region "$REGION" \
-              --upgrade-policy supportType=STANDARD
-
-            aws eks wait cluster-active \
-              --name "$CLUSTER" \
-              --region "$REGION"
-
-            SUPPORT_TYPE="STANDARD"
-            AUTO_REVERTED=1
-            ALERT=1
-            CHECK_STATUS="POLICY_REVERTED_TO_STANDARD"
-          fi
-
-          if [ -n "$ALLOWED_VERSION" ] && [ "$CURRENT_VERSION" != "$ALLOWED_VERSION" ]; then
-            ALERT=1
-            CHECK_STATUS="VERSION_NOT_APPROVED_TARGET"
-          fi
-
-          if [ -n "$DAYS_TO_EOS" ] && [ "$DAYS_TO_EOS" -le "$ALERT_DAYS" ]; then
-            ALERT=1
-            CHECK_STATUS="STANDARD_SUPPORT_ENDING_SOON"
-          fi
-
-          if [ "$VERSION_STATUS" = "EXTENDED_SUPPORT" ] || [ "$VERSION_STATUS" = "UNSUPPORTED" ]; then
-            ALERT=1
-            FAIL=1
-            CHECK_STATUS="UPGRADE_REQUIRED_NOW"
-          fi
-
-          {
-            echo "current_version=$CURRENT_VERSION"
-            echo "support_type=$SUPPORT_TYPE"
-            echo "version_status=$VERSION_STATUS"
-            echo "end_of_standard_support=$EOS_DATE"
-            echo "days_to_eos=$DAYS_TO_EOS"
-            echo "next_standard_version=$NEXT_STANDARD_VERSION"
-            echo "allowed_version=$ALLOWED_VERSION"
-            echo "auto_reverted=$AUTO_REVERTED"
-            echo "check_status=$CHECK_STATUS"
-            echo "alert=$ALERT"
-            echo "fail=$FAIL"
-          } >> "$GITHUB_OUTPUT"
-
-          {
-            echo "EKS Version Policy Check"
-            echo "Current Version: $CURRENT_VERSION"
-            echo "Upgrade Policy: $SUPPORT_TYPE"
-            echo "Version Status: $VERSION_STATUS"
-            echo "End Of Standard Support: $EOS_DATE"
-            echo "Days To EOS: ${DAYS_TO_EOS:-unknown}"
-            echo "Approved Version: ${ALLOWED_VERSION:-unset}"
-            echo "Next Standard Version: ${NEXT_STANDARD_VERSION:-none}"
-            echo "Policy Auto-Reverted: $AUTO_REVERTED"
-            echo "Check Status: $CHECK_STATUS"
-          } > eks-version-check.txt
-
-
       - name: Build daily cost report and detect risk
         if: steps.creds.outcome == 'success'
         id: report
@@ -197,7 +76,6 @@ jobs:
           ALERT=0
           awk -v t="$TOTAL" -v l="$LIMIT" 'BEGIN{exit !(t>l)}' && ALERT=1 || true
           [ -s risky-lines.txt ] && ALERT=1 || true
-          [ "${{ steps.eks.outputs.alert }}" = "1" ] && ALERT=1 || true
 
           {
             echo "AWS Daily Cost Report"
@@ -229,25 +107,17 @@ jobs:
             by-service.json
             by-usage-type.json
             risky-lines.txt
-            eks-version-check.txt
 
-      - name: Send alert email (SNS -> Gmail)
-        if: steps.creds.outcome == 'success' && steps.report.outputs.alert == '1'
+      - name: Email report (SNS -> Gmail)
+        if: steps.creds.outcome == 'success'
         run: |
           aws sns publish \
             --topic-arn "${{ secrets.COST_ALERT_SNS_TOPIC_ARN }}" \
-            --subject "AWS Daily Cost Alert" \
+            --subject "AWS Daily Cost Report" \
             --message file://cost-report.txt
-
-      - name: Fail if EKS upgrade is required now
-        if: steps.creds.outcome == 'success' && steps.eks.outputs.fail == '1'
-        run: |
-          echo "Cluster is already in ${{ steps.eks.outputs.version_status }} and must be upgraded to a standard-supported version."
-          exit 1
-
 
       - name: Fail workflow if risk detected
         if: steps.creds.outcome == 'success' && steps.report.outputs.alert == '1'
         run: |
-          echo "Cost/risk threshold hit. Check the uploaded artifact and SNS email."
+          echo "Cost/risk threshold hit. Check artifact + email."
           exit 1
