@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.3"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   backend "s3" {
@@ -43,13 +47,58 @@ module "eks" {
   tags   = var.default_tags
   source = "./modules/eks"
 
-  cluster_name    = var.cluster_name
-  cluster_version = var.cluster_version
-  vpc_id          = module.vpc.vpc_id
-  subnet_ids      = module.vpc.private_subnet_ids
-  node_groups     = var.node_groups
+  cluster_name            = var.cluster_name
+  cluster_version         = var.cluster_version
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_subnet_ids
+  node_groups             = var.node_groups
   public_endpoint_enabled = var.eks_public_endpoint_enabled
   public_access_cidrs     = var.eks_public_access_cidrs
+}
+
+data "tls_certificate" "eks_oidc" {
+  url = module.eks.cluster_oidc_issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks" {
+  url             = module.eks.cluster_oidc_issuer
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.eks_oidc.certificates[0].sha1_fingerprint]
+}
+
+data "aws_iam_policy_document" "aws_load_balancer_controller_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(module.eks.cluster_oidc_issuer, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(module.eks.cluster_oidc_issuer, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:aws-load-balancer-controller"]
+    }
+  }
+}
+
+resource "aws_iam_role" "aws_load_balancer_controller" {
+  name               = "${var.cluster_name}-aws-load-balancer-controller"
+  assume_role_policy = data.aws_iam_policy_document.aws_load_balancer_controller_assume_role.json
+  tags               = var.default_tags
+}
+
+resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
+  role       = aws_iam_role.aws_load_balancer_controller.name
+  policy_arn = module.eks.aws_load_balancer_controller_policy_arn
 }
 
 resource "aws_security_group_rule" "github_runner_to_eks_api" {

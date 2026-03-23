@@ -173,6 +173,9 @@ jobs:
           timeout 20s kubectl get nodes
 
           VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+          ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
+          kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
           helm repo add eks https://aws.github.io/eks-charts
           timeout 120s helm repo update
 
@@ -194,7 +197,7 @@ jobs:
           helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
             -n kube-system \
             --set clusterName="$CLUSTER_NAME" \
-            --set serviceAccount.create=true \
+            --set serviceAccount.create=false \
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="$AWS_REGION" \
             --set vpcId="$VPC_ID" \
@@ -294,15 +297,18 @@ jobs:
             echo "ALB webhook dry-run failed; reinstalling controller."
             CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
             VPC_ID=$(terraform -chdir=terraform output -raw vpc_id)
+            ALB_ROLE_ARN=$(terraform -chdir=terraform output -raw aws_load_balancer_controller_role_arn)
             kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
             kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
             kubectl -n kube-system delete secret aws-load-balancer-tls --ignore-not-found
             kubectl -n kube-system delete service aws-load-balancer-webhook-service --ignore-not-found
             kubectl -n kube-system delete deployment aws-load-balancer-controller --ignore-not-found
+            kubectl -n kube-system create serviceaccount aws-load-balancer-controller --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n kube-system annotate serviceaccount aws-load-balancer-controller eks.amazonaws.com/role-arn="$ALB_ROLE_ARN" --overwrite
             helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
               -n kube-system \
               --set clusterName="$CLUSTER_NAME" \
-              --set serviceAccount.create=true \
+              --set serviceAccount.create=false \
               --set serviceAccount.name=aws-load-balancer-controller \
               --set region="$AWS_REGION" \
               --set vpcId="$VPC_ID" \

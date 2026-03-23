@@ -22,6 +22,10 @@ output "github_actions_role_arn" {
   value = aws_iam_role.github_actions_cost_ops.arn
 }
 
+output "aws_load_balancer_controller_role_arn" {
+  value = aws_iam_role.aws_load_balancer_controller.arn
+}
+
 output "region" {
   description = "AWS region in use"
   value       = var.region
