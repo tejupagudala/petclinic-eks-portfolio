@@ -244,6 +244,20 @@ jobs:
             -n argocd --create-namespace \
             --set configs.params.server.insecure=true
 
+      - name: Install Argo Rollouts
+        run: |
+          kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+          kubectl -n argo-rollouts rollout status deployment/argo-rollouts --timeout=600s
+
+      - name: Install kubectl argo rollouts plugin
+        run: |
+          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x ./kubectl-argo-rollouts-linux-amd64
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+          kubectl argo rollouts version
+
+
       - name: Install Prometheus + Grafana
         continue-on-error: true
         run: |
@@ -412,7 +426,7 @@ jobs:
           kubectl -n petclinic rollout status deployment/customers-service --timeout=600s
           kubectl -n petclinic rollout status deployment/vets-service --timeout=600s
           kubectl -n petclinic rollout status deployment/visits-service --timeout=600s
-          kubectl -n petclinic rollout status deployment/api-gateway --timeout=600s
+          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
           for i in {1..60}; do
             ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
             if [ -n "$ALB" ]; then
