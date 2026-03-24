@@ -239,11 +239,5 @@ variable "rds_allocated_storage" {
 }
 
 variable "rds_username" {
-  type      = string
-  sensitive = true
-}
-
-variable "rds_password" {
-  type      = string
-  sensitive = true
+  type = string
 }

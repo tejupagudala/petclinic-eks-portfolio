@@ -30,8 +30,10 @@ resource "aws_db_instance" "petclinic" {
   allocated_storage       = var.rds_allocated_storage
   storage_type            = "gp3"
   db_name                 = "petclinic"
-  username                = var.rds_username
-  password                = var.rds_password
+
+  username                    = var.rds_username
+  manage_master_user_password = true
+
   db_subnet_group_name    = aws_db_subnet_group.petclinic.name
   vpc_security_group_ids  = [aws_security_group.rds.id]
   publicly_accessible     = false
@@ -42,3 +44,5 @@ resource "aws_db_instance" "petclinic" {
 
   tags = var.default_tags
 }
+
+

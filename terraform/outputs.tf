@@ -58,6 +58,10 @@ output "rds_identifier" {
   value = aws_db_instance.petclinic.id
 }
 
+output "rds_master_user_secret_arn" {
+  value = aws_db_instance.petclinic.master_user_secret[0].secret_arn
+}
+
 # output "cur_bucket_name" {
 #   value = aws_s3_bucket.cur.bucket
 # }
