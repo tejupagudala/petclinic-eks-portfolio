@@ -24,6 +24,7 @@ jobs:
       TF_VAR_existing_anomaly_monitor_arn: ""
       TF_VAR_aws_auth_role_arns: '[]'
       TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
+      TF_VAR_rds_username: ${{ secrets.RDS_USERNAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,6 +103,7 @@ jobs:
       TF_VAR_existing_anomaly_monitor_arn: ""
       TF_VAR_aws_auth_role_arns: '[]'
       TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
+      TF_VAR_rds_username: ${{ secrets.RDS_USERNAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -298,6 +300,13 @@ jobs:
           helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
             -n monitoring --create-namespace
 
+      - name: Verify Prometheus stack
+        run: |
+          set -euo pipefail
+          kubectl get crd servicemonitors.monitoring.coreos.com
+          kubectl -n monitoring get pods
+          kubectl -n monitoring get svc
+
       - name: Verify AWS Load Balancer Controller IRSA
         run: |
           set -euo pipefail
@@ -401,8 +410,6 @@ jobs:
             username: petclinic
             password: petclinic
           EOF
-          kubectl apply -f kubernetes/mysql/deploy.yaml
-          kubectl apply -f kubernetes/mysql/service.yaml
           kubectl apply -f kubernetes/discovery-server/
           kubectl apply -f kubernetes/config-server/
           kubectl apply -f kubernetes/customers-service/
@@ -428,7 +435,6 @@ jobs:
       - name: Readiness checks
         run: |
           set -euo pipefail
-          kubectl -n petclinic rollout status deployment/mysql --timeout=600s
           kubectl -n petclinic rollout status deployment/discovery-server --timeout=600s
           kubectl -n petclinic rollout status deployment/config-server --timeout=600s
           kubectl -n petclinic rollout status deployment/customers-service --timeout=600s
