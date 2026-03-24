@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: api-gateway-prometheus-analysis
+  namespace: petclinic
+spec:
+  args:
+    - name: prometheus-address
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+    - name: canary-service
+      value: api-gateway-canary
+  metrics:
+    - name: canary-success-rate
+      interval: 1m
+      count: 3
+      failureLimit: 1
+      successCondition: result[0] >= 0.95
+      provider:
+        prometheus:
+          address: "{{args.prometheus-address}}"
+          query: |
+            sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status!~"5.."}[2m]))
+            /
+            clamp_min(sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m])), 0.001)
+
+    - name: canary-5xx-rate
+      interval: 1m
+      count: 3
+      failureLimit: 1
+      successCondition: result[0] <= 0.01
+      provider:
+        prometheus:
+          address: "{{args.prometheus-address}}"
+          query: |
+            sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status=~"5.."}[2m]))
+            /
+            clamp_min(sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m])), 0.001)
+
+# this tells Argo Rollouts what “healthy canary” means
+# success rate and 5xx rate are good first metrics
+# if canary fails these, rollout can abort before full promotion

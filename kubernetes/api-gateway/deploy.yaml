@@ -28,7 +28,21 @@ spec:
           servicePort: 8080
       steps:
         - setWeight: 20
+        - pause:
+            duration: 2m
+        - analysis:
+            templates:
+              - templateName: api-gateway-prometheus-analysis
+            args:
+              - name: prometheus-address
+                value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+              - name: canary-service
+                value: api-gateway-canary
         - pause: {}
+
+#  after shifting 20% traffic, wait a bit so Prometheus has data
+# run analysis against canary metrics
+# only then move to the manual approval pause
   template:
     metadata:
       labels:
