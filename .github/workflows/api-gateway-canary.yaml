@@ -1,6 +1,7 @@
 name: api-gateway-canary
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
@@ -126,6 +127,34 @@ jobs:
           set -euo pipefail
           kubectl argo rollouts promote api-gateway -n petclinic
           kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
+    
+
+      - name: Debug api-gateway rollout state
+        run: |
+          set -euo pipefail
+
+          echo "Rollout image:"
+          kubectl -n petclinic get rollout api-gateway -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo
+
+          echo "ReplicaSets:"
+          kubectl -n petclinic get rs -l app.kubernetes.io/name=api-gateway
+
+          echo "Pods:"
+          kubectl -n petclinic get pods -l app.kubernetes.io/name=api-gateway -o wide
+
+          echo "Stable service welcome fragment:"
+          kubectl -n petclinic run stable-debug-${GITHUB_RUN_ID} \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c 'curl -fsS http://api-gateway-stable:8080/scripts/fragments/welcome.html | sed -n "1,10p"'
+
+          echo "Canary service welcome fragment:"
+          kubectl -n petclinic run canary-debug-${GITHUB_RUN_ID} \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c 'curl -fsS http://api-gateway-canary:8080/scripts/fragments/welcome.html | sed -n "1,10p"'
+
 
   rollback:
     needs: [deploy-canary, promote]
