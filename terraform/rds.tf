@@ -1,3 +1,16 @@
+resource "aws_kms_key" "rds" {
+  description             = "KMS key for RDS storage encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  tags = var.default_tags
+}
+
+resource "aws_kms_alias" "rds" {
+  name          = "alias/${var.cluster_name}-rds"
+  target_key_id = aws_kms_key.rds.key_id
+}
+
 resource "aws_db_subnet_group" "petclinic" {
   name       = "${var.cluster_name}-rds-subnet-group"
   subnet_ids = module.vpc.private_subnet_ids
@@ -29,6 +42,8 @@ resource "aws_db_instance" "petclinic" {
   instance_class          = var.rds_instance_class
   allocated_storage       = var.rds_allocated_storage
   storage_type            = "gp3"
+  storage_encrypted       = true
+  kms_key_id              = aws_kms_key.rds.arn
   db_name                 = "petclinic"
 
   username                    = var.rds_username
@@ -44,5 +59,3 @@ resource "aws_db_instance" "petclinic" {
 
   tags = var.default_tags
 }
-
-
