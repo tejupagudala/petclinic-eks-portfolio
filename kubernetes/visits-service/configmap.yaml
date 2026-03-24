@@ -14,7 +14,7 @@ data:
         config:
           enabled: false
       datasource:
-        url: jdbc:mysql://mysql.petclinic.svc.cluster.local:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+        url: ${DB_URL}
         username: ${DB_USERNAME}
         password: ${DB_PASSWORD}
         driver-class-name: com.mysql.cj.jdbc.Driver
