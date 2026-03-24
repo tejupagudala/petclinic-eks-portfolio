@@ -46,6 +46,22 @@ output "github_runner_private_ip" {
   value       = var.enable_github_runner ? aws_instance.github_runner[0].private_ip : null
 }
 
+output "rds_endpoint" {
+  value = aws_db_instance.petclinic.address
+}
+
+output "rds_port" {
+  value = aws_db_instance.petclinic.port
+}
+
+output "rds_identifier" {
+  value = aws_db_instance.petclinic.id
+}
+
+output "rds_master_user_secret_arn" {
+  value = aws_db_instance.petclinic.master_user_secret[0].secret_arn
+}
+
 # output "cur_bucket_name" {
 #   value = aws_s3_bucket.cur.bucket
 # }
