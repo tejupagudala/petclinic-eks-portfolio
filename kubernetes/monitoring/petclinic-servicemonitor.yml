@@ -1,7 +1,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: api-gateway-sm
+  name: api-gateway-stable-sm
   namespace: monitoring
   labels:
     release: kube-prometheus-stack
@@ -11,7 +11,28 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: api-gateway
-  jobLabel: app.kubernetes.io/name
+      app.kubernetes.io/component: stable
+  jobLabel: app.kubernetes.io/component
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-gateway-canary-sm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["petclinic"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+      app.kubernetes.io/component: canary
+  jobLabel: app.kubernetes.io/component
   endpoints:
     - port: http
       path: /actuator/prometheus

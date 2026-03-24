@@ -416,6 +416,12 @@ jobs:
           kubectl apply -f kubernetes/vets-service/
           kubectl apply -f kubernetes/visits-service/
           kubectl apply -f kubernetes/api-gateway/
+      - name: Verify petclinic ServiceMonitors
+        run: |
+          set -euo pipefail
+          kubectl -n monitoring get servicemonitors
+          kubectl -n monitoring describe servicemonitor api-gateway-sm || true
+          kubectl -n petclinic get svc
 
       - name: Refresh AWS credentials before readiness checks
         uses: aws-actions/configure-aws-credentials@v4
@@ -455,6 +461,29 @@ jobs:
           fi
           kubectl get pods -n petclinic
           kubectl get ingress -n petclinic
+
+      - name: Verify Prometheus scrape targets
+        run: |
+          set -euo pipefail
+          kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090 >/tmp/prom-portforward.log 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID' EXIT
+          sleep 10
+
+          curl -fsS "http://127.0.0.1:9090/api/v1/targets" > /tmp/prom-targets.json
+
+          echo "Prometheus targets summary:"
+          jq '.data.activeTargets[] | {job: .labels.job, health: .health, scrapeUrl: .scrapeUrl}' /tmp/prom-targets.json
+
+      - name: Verify api-gateway Prometheus metrics
+        run: |
+          set -euo pipefail
+          kubectl -n petclinic run prom-check-${GITHUB_RUN_ID} \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c 'curl -fsS http://api-gateway:8080/actuator/prometheus | head -n 20'
+
+
 
       - name: Dump app diagnostics on failure
         if: failure()
