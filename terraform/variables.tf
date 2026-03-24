@@ -227,3 +227,23 @@ variable "github_runner_allowed_ssh_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "rds_instance_class" {
+  type    = string
+  default = "db.t4g.micro"
+}
+
+variable "rds_allocated_storage" {
+  type    = number
+  default = 20
+}
+
+variable "rds_username" {
+  type      = string
+  sensitive = true
+}
+
+variable "rds_password" {
+  type      = string
+  sensitive = true
+}
