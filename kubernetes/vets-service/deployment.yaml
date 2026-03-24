@@ -23,16 +23,23 @@ spec:
             name: vets-service-config
     
       initContainers:
-        - name: wait-for-mysql
+        - name: wait-for-rds
           image: busybox:1.36
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: host
           command:
             - sh
             - -c
             - |
-              until nc -z mysql 3306; do
-                echo "waiting for mysql:3306..."
+              until nc -z "$DB_HOST" 3306; do
+                echo "waiting for rds:3306..."
                 sleep 2
               done
+
       containers:
         - name: vets-service
           image: tejupagudala/vets-service:23464787919
@@ -53,16 +60,17 @@ spec:
               value: "false"
             - name: SPRING_CLOUD_CONFIG_IMPORT_CHECK_ENABLED
               value: "false"
-            - name: DB_USERNAME
+            - name: DB_URL
               valueFrom:
                 secretKeyRef:
                   name: mysql-credentials
-                  key: username
-            - name: DB_PASSWORD
+                  key: url
+            - name: DB_HOST
               valueFrom:
                 secretKeyRef:
                   name: mysql-credentials
-                  key: password
+                  key: host
+
           volumeMounts:
             - name: app-config
               mountPath: /config/application.yml
