@@ -70,6 +70,16 @@ spec:
                 secretKeyRef:
                   name: mysql-credentials
                   key: host
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: password
 
           volumeMounts:
             - name: app-config
