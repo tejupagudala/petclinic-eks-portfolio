@@ -13,11 +13,47 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   id-token: write
   contents: read
 
 jobs:
+  verify-infra-bootstrap:
+    runs-on: ubuntu-latest
+    outputs:
+      bootstrap_run_url: ${{ steps.check.outputs.bootstrap_run_url }}
+    steps:
+      - name: Verify latest infra-bootstrap on main succeeded
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUN_JSON=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/infra-bootstrap.yaml/runs?branch=main&status=completed&per_page=1")
+
+          COUNT=$(echo "$RUN_JSON" | jq '.total_count')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No completed infra-bootstrap run found on main."
+            exit 1
+          fi
+
+          CONCLUSION=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].conclusion')
+          RUN_URL=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].html_url')
+
+          echo "bootstrap_run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+          echo "Latest infra-bootstrap run: ${RUN_URL}"
+          echo "Latest infra-bootstrap conclusion: ${CONCLUSION}"
+
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "infra-bootstrap must succeed before api-gateway canary deployment can start."
+            exit 1
+          fi
+
   deploy-canary:
+    needs: verify-infra-bootstrap
     runs-on: [self-hosted, linux, aws-vpc]
     outputs:
       alb_hostname: ${{ steps.alb.outputs.hostname }}
