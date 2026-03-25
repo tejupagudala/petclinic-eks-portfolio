@@ -55,7 +55,7 @@ output "rds_port" {
 }
 
 output "rds_identifier" {
-  value = aws_db_instance.petclinic.id
+  value = aws_db_instance.petclinic.identifier
 }
 
 output "rds_master_user_secret_arn" {
