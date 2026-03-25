@@ -144,6 +144,14 @@ jobs:
           terraform -chdir=terraform init -input=false
           terraform -chdir=terraform apply -auto-approve -input=false
 
+      - name: Wait for RDS
+        run: |
+          set -euo pipefail
+          RDS_ID=$(terraform -chdir=terraform output -raw rds_identifier)
+          aws rds wait db-instance-available \
+            --db-instance-identifier "$RDS_ID" \
+            --region "$AWS_REGION"
+
       - name: Install tooling
         run: |
           KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
@@ -399,7 +407,13 @@ jobs:
           if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
             kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
           fi
-          cat <<'EOF' | kubectl apply -f -
+          RDS_ENDPOINT=$(terraform -chdir=terraform output -raw rds_endpoint)
+          RDS_SECRET_ARN=$(terraform -chdir=terraform output -raw rds_master_user_secret_arn)
+          RDS_SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id "$RDS_SECRET_ARN" --query SecretString --output text)
+          DB_USERNAME=$(echo "$RDS_SECRET_JSON" | jq -r '.username')
+          DB_PASSWORD=$(echo "$RDS_SECRET_JSON" | jq -r '.password')
+
+          cat <<EOF | kubectl apply -f -
           apiVersion: v1
           kind: Secret
           metadata:
@@ -407,8 +421,10 @@ jobs:
             namespace: petclinic
           type: Opaque
           stringData:
-            username: petclinic
-            password: petclinic
+            username: "${DB_USERNAME}"
+            password: "${DB_PASSWORD}"
+            host: "${RDS_ENDPOINT}"
+            url: "jdbc:mysql://${RDS_ENDPOINT}:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true"
           EOF
           kubectl apply -f kubernetes/discovery-server/
           kubectl apply -f kubernetes/config-server/
@@ -482,6 +498,33 @@ jobs:
             --rm -i --restart=Never \
             --image=curlimages/curl:8.10.1 \
             --command -- sh -c 'curl -fsS http://api-gateway:8080/actuator/prometheus | head -n 20'
+
+      - name: Dump customers-service diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== customers-service deployment ==="
+          kubectl -n petclinic get deploy customers-service -o wide || true
+          kubectl -n petclinic describe deployment customers-service || true
+
+          echo "=== customers-service replica sets ==="
+          kubectl -n petclinic get rs -l app.kubernetes.io/name=customers-service -o wide || true
+
+          echo "=== customers-service pods ==="
+          kubectl -n petclinic get pods -l app.kubernetes.io/name=customers-service -o wide || true
+          kubectl -n petclinic describe pods -l app.kubernetes.io/name=customers-service || true
+
+          echo "=== customers-service logs ==="
+          kubectl -n petclinic logs -l app.kubernetes.io/name=customers-service --all-containers --tail=200 || true
+
+          echo "=== customers-service configmap ==="
+          kubectl -n petclinic get configmap customers-service-config -o yaml || true
+
+          echo "=== mysql-credentials host/url keys ==="
+          kubectl -n petclinic get secret mysql-credentials -o jsonpath='{.data.host}' | base64 -d || true
+          echo
+          kubectl -n petclinic get secret mysql-credentials -o jsonpath='{.data.url}' | base64 -d || true
+          echo
+
 
 
 
