@@ -198,19 +198,30 @@ jobs:
           unset TF_VAR_aws_auth_role_arns
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
 
+          echo "Current EKS add-ons:"
           aws eks list-addons \
             --cluster-name "$CLUSTER_NAME" \
             --region "$AWS_REGION"
 
-          aws eks describe-addon \
+          if aws eks describe-addon \
             --cluster-name "$CLUSTER_NAME" \
             --addon-name eks-pod-identity-agent \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" >/tmp/pod-identity.json 2>/tmp/pod-identity.err; then
+            cat /tmp/pod-identity.json
+          else
+            echo "eks-pod-identity-agent not installed yet"
+            cat /tmp/pod-identity.err || true
+          fi
 
-          aws eks describe-addon \
+          if aws eks describe-addon \
             --cluster-name "$CLUSTER_NAME" \
             --addon-name amazon-cloudwatch-observability \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" >/tmp/cw-addon.json 2>/tmp/cw-addon.err; then
+            cat /tmp/cw-addon.json
+          else
+            echo "amazon-cloudwatch-observability not installed yet"
+            cat /tmp/cw-addon.err || true
+          fi
 
           kubectl get pods -n kube-system | grep eks-pod-identity-agent || true
           kubectl get pods -n amazon-cloudwatch || true
