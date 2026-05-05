@@ -5,16 +5,22 @@ existing_anomaly_monitor_arn  = ""
 github_org                    = "tejupagudala"
 github_repo                   = "petclinic-eks-portfolio"
 github_branch                 = "main"
+github_oidc_provider_arn      = "arn:aws:iam::479407618698:oidc-provider/token.actions.githubusercontent.com"
 eks_public_endpoint_enabled   = true
 alert_email                   = "teju.654@gmail.com"
+rds_instance_class    = "db.t4g.micro"
+rds_allocated_storage = 20
+rds_username = "petclinic"
+eks_public_access_cidrs = ["0.0.0.0/0"]
+
 
 node_groups = {
   "demo-node-group" = {
     instance_types = ["t3.small"]
     capacity_type  = "SPOT"
     scaling_config = {
-      desired_size = 4
-      max_size     = 5
+      desired_size = 5
+      max_size     = 6
       min_size     = 1
     }
   }
