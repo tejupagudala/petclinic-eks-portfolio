@@ -22,7 +22,7 @@ jobs:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
       TF_VAR_enable_cost_anomaly_detection: "false"
       TF_VAR_existing_anomaly_monitor_arn: ""
-      TF_VAR_aws_auth_role_arns: '[]'
+      TF_VAR_aws_auth_role_arns: '["${{ secrets.AWS_ROLE_ARN_INFRA }}"]'
       TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
       TF_VAR_rds_username: ${{ secrets.RDS_USERNAME }}
     steps:
@@ -101,7 +101,7 @@ jobs:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
       TF_VAR_enable_cost_anomaly_detection: "false"
       TF_VAR_existing_anomaly_monitor_arn: ""
-      TF_VAR_aws_auth_role_arns: '[]'
+      TF_VAR_aws_auth_role_arns: '["${{ secrets.AWS_ROLE_ARN_INFRA }}"]'
       TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
       TF_VAR_rds_username: ${{ secrets.RDS_USERNAME }}
     steps:
@@ -175,6 +175,29 @@ jobs:
           kubectl config use-context "arn:aws:eks:${AWS_REGION}:479407618698:cluster/${CLUSTER_NAME}"
           kubectl auth can-i get pods -A
           kubectl get ns
+     
+      - name: Verify CloudWatch observability add-ons
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+
+          aws eks list-addons \
+            --cluster-name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+          aws eks describe-addon \
+            --cluster-name "$CLUSTER_NAME" \
+            --addon-name eks-pod-identity-agent \
+            --region "$AWS_REGION"
+
+          aws eks describe-addon \
+            --cluster-name "$CLUSTER_NAME" \
+            --addon-name amazon-cloudwatch-observability \
+            --region "$AWS_REGION"
+
+          kubectl get pods -n kube-system | grep eks-pod-identity-agent || true
+          kubectl get pods -n amazon-cloudwatch || true
+
 
       - name: Install AWS Load Balancer Controller
         run: |
@@ -432,6 +455,16 @@ jobs:
           kubectl apply -f kubernetes/vets-service/
           kubectl apply -f kubernetes/visits-service/
           kubectl apply -f kubernetes/api-gateway/
+
+      - name: Verify CloudWatch log groups
+        run: |
+          set -euo pipefail
+          CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
+
+          aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/containerinsights/${CLUSTER_NAME}" \
+            --region "$AWS_REGION"
+
       - name: Verify petclinic ServiceMonitors
         run: |
           set -euo pipefail
