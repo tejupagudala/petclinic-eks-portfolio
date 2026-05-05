@@ -301,11 +301,30 @@ jobs:
       - name: Install Argo CD
         continue-on-error: true
         run: |
+          set -euo pipefail
           helm repo add argo https://argoproj.github.io/argo-helm
           helm repo update
+
+          if helm -n argocd status argocd >/dev/null 2>&1; then
+            STATUS="$(helm -n argocd status argocd 2>/dev/null | awk '/^STATUS:/{print $2}' || true)"
+            if [ "$STATUS" = "deployed" ] && kubectl -n argocd wait --for=condition=Available deployment/argocd-server --timeout=120s >/dev/null 2>&1; then
+              echo "Argo CD release is already healthy; skipping reinstall."
+              exit 0
+            fi
+
+            if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ] || [ "$STATUS" = "failed" ]; then
+              echo "Existing Argo CD release is in state: $STATUS. Cleaning it up before reinstall."
+              helm -n argocd uninstall argocd || true
+              kubectl -n argocd delete job argocd-redis-secret-init --ignore-not-found
+              kubectl -n argocd delete pod -l job-name=argocd-redis-secret-init --ignore-not-found
+            fi
+          fi
+
           helm upgrade --install argocd argo/argo-cd \
             -n argocd --create-namespace \
-            --set configs.params.server.insecure=true
+            --set configs.params.server.insecure=true \
+            --wait \
+            --timeout 10m
 
       - name: Install Argo Rollouts
         run: |
