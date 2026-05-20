@@ -1,0 +1,22 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: aiops-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+aiops:
+  cluster-name: ${AIOPS_CLUSTER_NAME:demo-eks-cluster}
+  aws-region: ${AWS_REGION:us-east-1}
+  namespace: ${AIOPS_NAMESPACE:petclinic}
+  cloudwatch-application-log-group: ${AIOPS_CLOUDWATCH_APPLICATION_LOG_GROUP:/aws/containerinsights/demo-eks-cluster/application}
+  prometheus-base-url: ${AIOPS_PROMETHEUS_BASE_URL:http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090}
+  bedrock-model-id: ${AIOPS_BEDROCK_MODEL_ID:anthropic.claude-3-haiku-20240307-v1:0}
+  bedrock-max-tokens: ${AIOPS_BEDROCK_MAX_TOKENS:300}
+  bedrock-temperature: ${AIOPS_BEDROCK_TEMPERATURE:0.1}
