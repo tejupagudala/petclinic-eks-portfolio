@@ -16,7 +16,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "terraform-demo-eks-state-lock-bucket"
+    bucket       = "petclinic-terraform-state-589077667712"
     key          = "terraform.lock.tfstate"
     region       = "us-east-1"
     use_lockfile = true

@@ -5,13 +5,14 @@ existing_anomaly_monitor_arn  = ""
 github_org                    = "tejupagudala"
 github_repo                   = "petclinic-eks-portfolio"
 github_branch                 = "main"
-github_oidc_provider_arn      = "arn:aws:iam::479407618698:oidc-provider/token.actions.githubusercontent.com"
-eks_public_endpoint_enabled   = true
-alert_email                   = "teju.654@gmail.com"
-rds_instance_class    = "db.t4g.micro"
-rds_allocated_storage = 20
-rds_username = "petclinic"
-eks_public_access_cidrs = ["0.0.0.0/0"]
+# Empty means Terraform creates the GitHub OIDC provider in this AWS account.
+github_oidc_provider_arn    = "arn:aws:iam::589077667712:oidc-provider/token.actions.githubusercontent.com"
+eks_public_endpoint_enabled = true
+alert_email                 = "teju.654@gmail.com"
+rds_instance_class          = "db.t4g.micro"
+rds_allocated_storage       = 20
+rds_username                = "petclinic"
+eks_public_access_cidrs     = ["75.210.79.3/32"]
 
 
 node_groups = {

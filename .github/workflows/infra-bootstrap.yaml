@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  id-token: write
+  id-token: write # ← Lets workflow request a JWT
   contents: read
 
 jobs:
@@ -188,7 +188,7 @@ jobs:
           CLUSTER_NAME=$(terraform -chdir=terraform output -raw cluster_name)
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG"
           aws sts get-caller-identity
-          kubectl config use-context "arn:aws:eks:${AWS_REGION}:479407618698:cluster/${CLUSTER_NAME}"
+          kubectl config use-context "arn:aws:eks:${AWS_REGION}:589077667712:cluster/${CLUSTER_NAME}"
           kubectl auth can-i get pods -A
           kubectl get ns
      
@@ -325,6 +325,11 @@ jobs:
             --set configs.params.server.insecure=true \
             --wait \
             --timeout 10m
+
+      - name: Register Argo CD Applications
+        run: |
+          kubectl apply -f kubernetes/argocd/ -n argocd
+          kubectl -n argocd wait --for=condition=Available deployment/argocd-application-controller --timeout=120s
 
       - name: Install Argo Rollouts
         run: |
@@ -504,9 +509,11 @@ jobs:
           kubectl apply -f kubernetes/discovery-server/
           kubectl apply -f kubernetes/config-server/
           kubectl apply -f kubernetes/customers-service/
-          kubectl apply -f kubernetes/vets-service/
           kubectl apply -f kubernetes/visits-service/
-          kubectl apply -f kubernetes/api-gateway/
+
+      - name: Wait for Argo CD apps to sync
+        run: |
+          kubectl -n argocd wait --for=condition=Synced --all applications --timeout=10m
 
       - name: Verify CloudWatch log groups
         run: |

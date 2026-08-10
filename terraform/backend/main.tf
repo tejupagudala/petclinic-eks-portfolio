@@ -14,7 +14,7 @@ provider "aws" {
 }
 
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "terraform-demo-eks-state-lock-bucket"
+  bucket = "petclinic-terraform-state-589077667712"
 
   lifecycle {
     prevent_destroy = false
