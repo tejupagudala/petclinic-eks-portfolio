@@ -1,0 +1,501 @@
+# Interview One-Liners — Cheat Card
+
+Interview-grade one-liners. Drop them verbatim. Memorize for cramming before any interview.
+
+**How to use:**
+- Before interview: Read top to bottom (~10 min)
+- During interview: Drop the matching one-liner when the topic comes up
+- After interview: Add new questions that came up
+- Weekly: Re-read to stay fresh
+
+---
+
+## 📑 Table of Contents
+
+- [Phase 1 — CI/CD Foundation](#phase-1--cicd-foundation)
+- [Phase 2 — Cost Discipline](#phase-2--cost-discipline)
+- [Phase 2 — Security Hardening](#phase-2--security-hardening)
+- [Phase 2 — Least-Privilege IAM](#phase-2--least-privilege-iam)
+- [GitHub Actions Mechanics](#github-actions-mechanics)
+- [The Senior "Power Phrases" (Drop Anywhere)](#power-phrases)
+
+---
+
+## Phase 1 — CI/CD Foundation
+
+### The WHY of CI/CD (manual deploys vs GitOps)
+> *"Manual deploys are slow, error-prone, and the cluster diverges from source control with no audit trail. GitOps flips this — git becomes the source of truth, Argo CD reconciles the cluster to match, and the cluster becomes a downstream artifact instead of a piece of mutable infrastructure people manually touch."*
+
+### Repo structure + Spring Petclinic context
+> *"My project forks the Spring Petclinic Microservices reference architecture — six Spring Boot services. The repo is organized into four clean top-level directories: `app/`, `terraform/`, `kubernetes/`, and `.github/workflows/`. That separation signals architectural maturity — most juniors mix Terraform into the app folder."*
+
+### Walk me through the CI/CD pipeline
+> *"My pipeline has five jobs in order: `build` (Maven multi-module), `code-quality` (SonarCloud + JaCoCo, blocking gate), `security-scan` (Trivy in three modes), `docker` (build → scan-before-push → push with two tags), and `updatek8s` (sed-replace the image tag, commit to PR branch as a bot user). The whole thing runs in 4-5 minutes."*
+
+### Multi-stage Dockerfile + layertools
+> *"My Dockerfile is a two-stage build. The builder uses Spring Boot's `layertools extract` to split the fat JAR into four layers — dependencies, spring-boot-loader, snapshot-dependencies, and application code. The runtime stage copies each as a separate `COPY` instruction. Result: code-change rebuilds drop from 150 MB to 2 MB because Docker only rebuilds the application layer."*
+
+### Maven multi-module + -pl -am flags
+> *"`-pl spring-petclinic-api-gateway` builds only that module; `-am` (also-make) adds its dependencies. Together they let me build just api-gateway plus what it needs in about a minute, instead of rebuilding all six services for five minutes — a 5x CI speedup on monorepos."*
+
+### Java 17 vs Temurin distribution
+> *"Java 17 is the spec; Temurin is the free, Eclipse-Foundation distribution. I picked Temurin because Oracle JDK requires a paid license for production use, and Temurin is the industry default for new Java workloads since 2021. It's also TCK-certified and natively supported by `actions/setup-java@v4`."*
+
+### JaCoCo + SonarCloud (blocking gate)
+> *"JaCoCo instruments bytecode to measure coverage during the Maven `verify` phase and emits `jacoco.xml`. SonarCloud reads that XML to compute the coverage portion of the quality gate. The `sonar.qualitygate.wait=true` flag makes the gate truly blocking — the workflow halts until pass or fail returns, instead of letting results go to a dashboard people forget to check."*
+
+### SonarCloud vs SonarQube + private-VPC self-hosting
+> *"SonarCloud is the SaaS at sonarcloud.io — zero ops, perfect for public repos and small teams. SonarQube is the self-hosted alternative for enterprises where source code can't leave the network. In a regulated environment, I'd deploy SonarQube on EKS with an internal ALB, RDS Postgres backed by Secrets Manager via IRSA, and CI runners inside the VPC — source code never crosses the public internet."*
+
+### CVE + CVSS scoring
+> *"CVE is the public identifier for a known vulnerability, maintained by MITRE. CVSS is the 0-10 severity score. My Trivy gate fails the build on HIGH and CRITICAL — CVSS 7.0 and above — with `ignore-unfixed: true` because blocking on unfixed CVEs is a dead end for the developer."*
+
+### Trivy 3-mode scanning + scan-before-push
+> *"I run Trivy in three modes: filesystem scan on `app/` for source dependencies, config scan on `kubernetes/api-gateway/` for K8s misconfigurations, and config scan on `terraform/` for IaC misconfigurations. The Docker image gets a fourth Trivy scan — built locally with `load: true, push: false`, scanned, and only pushed if clean. The registry is a trust boundary; a CVE-laden image never crosses it."*
+
+### Docker Buildx + DockerHub mechanics
+> *"Buildx is Docker's modern BuildKit-based engine. It gives me multi-platform builds, granular layer caching, and the critical `load: true, push: false` pattern I need to scan images before push. I authenticate to DockerHub with a username plus a scoped access token from GitHub Secrets, not a password."*
+
+### GitOps philosophy + Argo CD reconciliation
+> *"CI builds and updates git; CD deploys from git. My CI updates the image tag in the Kubernetes manifest and commits it. Argo CD, running inside the cluster, polls the main branch every three minutes and reconciles the cluster to match. The cluster has Argo CD's identity; my CI has zero cluster credentials. Rollback becomes `git revert`; audit becomes `git log`."*
+
+### Two-tag strategy (run_id + latest)
+> *"Every image gets two tags: `github.run_id` for immutability and `:latest` for local-dev convenience. Run_id maps 1:1 to a CI run, so I can trace any deployed image back to the exact tests, scans, and commit. `:latest` only lives on DockerHub — it never goes near a Kubernetes manifest."*
+
+### Why never :latest in K8s manifests
+> *"`:latest` breaks four things in K8s: rollback (can't pin to a previous image), audit (`kubectl describe` shows the tag, not the build), pull semantics (`imagePullPolicy: IfNotPresent` won't re-pull existing tags), and deployment change detection (pod spec hash doesn't change). Immutable tags solve all four with zero downside."*
+
+### The || operator + idempotency
+> *"`||` is shell's logical OR — `command1 || command2` runs command2 only if command1 fails. My `git commit ... || echo 'No changes to commit'` swallows the 'nothing to commit' failure that would otherwise break workflow re-runs on the same commit. It turns a non-idempotent step into a safe-to-retry one."*
+
+### The 3-guard if: condition
+> *"My updatek8s job has three guards: `docker.result == 'success'` prevents updating the manifest to a non-existent image; `event_name == 'pull_request'` prevents crashing on missing variables for non-PR triggers; and `head.repo.full_name == github.repository` blocks forked PRs from running the commit-back step — defending against the 'pwn request' attack vector where a malicious fork modifies the workflow to steal the bot token."*
+
+### Failure modes + partial-state recovery
+> *"If updatek8s fails after docker push succeeded, the image is in DockerHub but the manifest in git isn't updated — a partial-success state. The workflow goes red, the PR check goes red, branch protection blocks the merge. Recovery is idempotent: fix the issue, click 're-run failed jobs', every step is safe to repeat. I never merge a red PR — that ships the old code while the new image sits orphaned in the registry."*
+
+### What happens after PR merges to main
+> *"My CI runs only on `pull_request` events — it stops at updating the manifest in the PR branch. After I merge to main, no CI re-runs. Argo CD, running inside the cluster, watches main, sees the new manifest, pulls it, and applies it. Git is the trigger, not CI — that's the pull-based GitOps model."*
+
+### Concurrent PR conflicts
+> *"Two PRs run in parallel on separate runners — no conflict during execution. The conflict happens at merge time: both PRs updated the same `deploy.yaml`, so the second merge gets a merge conflict. For high-throughput teams, I'd add `concurrency: { group: api-gateway-${{ github.head_ref }}, cancel-in-progress: true }` to kill stale runs from the same PR."*
+
+### actions/setup-java@v4 caching
+> *"The `cache: maven` option hashes my `pom.xml` files, downloads `~/.m2/repository` from GitHub Cache if a matching key exists, runs my build, and saves the updated repo back at the end. First build downloads 100+ MB of dependencies; subsequent builds skip that entirely. Cuts build time from about 5 minutes to 1.5 minutes."*
+
+### GitHub Secrets injection + log redaction
+> *"Secrets are encrypted at rest by GitHub using libsodium sealed boxes. At runtime they're injected as environment variables only into steps that reference them via `${{ secrets.X }}`. GitHub auto-redacts secret values from logs — if I accidentally `echo` a secret, the log shows `***`. The leak vector to watch is transforms: if I base64-encode a secret, the transformed version isn't auto-redacted."*
+
+### contents: write permission — hardening
+> *"At the workflow level `contents: write` is coarse. The tighter version is to default the workflow to `contents: read` and scope `write` only to the `updatek8s` job. Beyond that, the truly senior move is to remove CI's write access entirely using Argo CD Image Updater — it watches the registry from inside the cluster and updates manifests itself, so CI has zero git write permissions."*
+
+---
+
+## Phase 2 — Cost Discipline
+
+### The 4-layer cost model (overarching framing)
+> *"My cost discipline runs across four layers — two reactive, two proactive. Spot t3.small for cheap compute, scheduled cron scaling for off-hours waste, daily cost report as a CI gate for real-time threshold violations, AWS Budgets plus Cost Anomaly Detection for proactive governance. Together they keep my AWS bill under twenty dollars a month while running a production-grade environment."*
+
+### The 3-layer cost defense matrix (defense-in-depth)
+> *"AWS Budgets catches threshold violations. Daily cost report catches real-time stealth cost drivers like NAT Gateway and ELB. Cost Anomaly Detector catches ML pattern deviations below my budget threshold. Three different mechanisms for three different failure modes — not redundant, complementary."*
+
+### Spot instances
+> *"My EKS nodegroup uses spot t3.small instances — roughly 70% cheaper than on-demand. For a portfolio project, momentary interruptions are acceptable. For production with stricter SLAs, I'd run mixed instance types and pools to spread reclaim risk."*
+
+### Scheduled nodegroup scaling
+> *"My `non-prod-stop.yaml` runs at 11 PM Chicago via cron and scales the EKS nodegroup to zero. `non-prod-start.yaml` scales it back to two at 8 AM. That's roughly 62% compute savings on top of spot, while still keeping the cluster usable during my work hours."*
+
+### Daily cost report workflow
+> *"`cost-report-daily.yaml` calls AWS Cost Explorer every morning, groups yesterday's spend by service and usage-type, flags risky lines like NatGateway-Hours and LoadBalancerUsage, emails me via SNS, and fails the workflow if cost exceeds my daily limit. Cost becomes a CI gate, not a dashboard people forget to check."*
+
+### AWS Cost Explorer API
+> *"AWS Cost Explorer is the API I hit for cost data — `ce:GetCostAndUsage` returns spending grouped by SERVICE, USAGE_TYPE, LINKED_ACCOUNT, or custom dimensions. It doesn't support resource-level permissions in IAM — requires `*` — which is a documented AWS API limitation."*
+
+### AWS Budgets multi-tier alerts
+> *"I run a monthly total budget plus four per-service budgets — EKS, EC2-Other, VPC, ELB — each with three notification thresholds: 50% actual, 80% forecasted, 100% actual. Graduated warning catches runaway spend before the bill arrives."*
+
+### KMS-encrypted SNS for cost alerts
+> *"My SNS topic for cost alerts uses a customer-managed KMS key with rotation enabled. Cost data is sensitive — encrypting at rest is AWS best practice and a SOC2/PCI requirement. The KMS key policy includes an `aws:SourceAccount` condition to defend against the confused deputy attack."*
+
+### SNS fan-out pattern
+> *"SNS gives me pub/sub fan-out — one topic, multiple subscribers. Today it's email; tomorrow I could add Slack, PagerDuty, Lambda, or SQS without touching the publishers. Email subscriptions require manual confirmation, so the topic can't accidentally spam someone."*
+
+### AWS Cost Anomaly Detection
+> *"On top of the threshold-based budgets, I have a dimensional Cost Anomaly Detector monitoring SERVICE-level spend daily. AWS-managed ML model trained on 90 days of my account's spend history. Catches sub-budget patterns Budgets miss — like a forgotten resource burning $3/day below my $20 threshold but deviating from my baseline."*
+
+### `cost_guardrails.tf` in 60 seconds
+> *"`cost_guardrails.tf` builds my entire cost governance stack in about 420 lines — five AWS Budgets with three notification tiers, a KMS-encrypted SNS topic for alerts, AWS Cost Anomaly Detector with dimensional ML monitoring, an OIDC trust setup for GitHub Actions, and a least-privilege IAM role for cost-ops workflows with six statements scoped by ARN, tag conditions, or documented exceptions. Everything parameterized — partition, account ID, cluster name, email — nothing hardcoded."*
+
+---
+
+## Phase 2 — Security Hardening
+
+### Pod Security Standards Restricted profile (framework name)
+> *"My pods enforce the Pod Security Standards Restricted profile — the strictest of Kubernetes' three baseline tiers (Privileged, Baseline, Restricted). Maps to CIS Kubernetes Benchmark sections 5.1 through 5.7 — the standard security audit document for K8s."*
+
+### Pod security context — full hardening
+> *"My pods enforce six PSS Restricted settings: `runAsNonRoot: true`, `runAsUser: 1000`, `allowPrivilegeEscalation: false`, all Linux capabilities dropped, `readOnlyRootFilesystem: true`, and `seccompProfile: RuntimeDefault`. That's the full CIS Kubernetes Benchmark hardening checklist."*
+
+### runAsNonRoot: true
+> *"`runAsNonRoot: true` makes Kubernetes refuse to start the container if it tries to run as UID 0. Defense in depth — even if the image accidentally specifies root, the kubelet blocks it."*
+
+### runAsUser + runAsGroup + fsGroup (identity, not permissions)
+> *"`runAsUser: 1000` sets the process UID. `runAsGroup: 1000` sets the primary group GID. `fsGroup: 1000` sets the GID applied to mounted volumes so the non-root user can read/write them. These set IDENTITY, not permissions — the difference matters because they're frequently confused."*
+
+### allowPrivilegeEscalation: false
+> *"`allowPrivilegeEscalation: false` blocks setuid binaries and `sudo` from gaining root. Even if an attacker compromises my JVM, they can't escalate to root inside the container."*
+
+### readOnlyRootFilesystem: true
+> *"`readOnlyRootFilesystem: true` mounts the container's root filesystem read-only. Attackers who escape the JVM can't drop binaries, modify configs, or persist anything. Writable directories like `/tmp` are emptyDir volumes mounted separately."*
+
+### capabilities.drop: [ALL]
+> *"Dropping ALL Linux capabilities removes kernel-level privileged operations like `NET_ADMIN` (network manipulation), `SYS_PTRACE` (process tracing), `SYS_MODULE` (loading kernel modules), `CHOWN` (changing file ownership). Spring Boot doesn't need any of them — I drop everything for full attack surface reduction."*
+
+### seccompProfile: RuntimeDefault
+> *"`seccompProfile: RuntimeDefault` applies Docker's curated syscall allowlist, blocking around 270 dangerous syscalls like `ptrace`, `mount`, `reboot`, and `keyctl`. seccomp is the Linux kernel's syscall filter — massive attack surface reduction with zero application impact."*
+
+### CIS Kubernetes Benchmark
+> *"The CIS Kubernetes Benchmark is the industry-standard security audit document for K8s. My pod security context implements sections 5.1 through 5.7 — non-root user, no privilege escalation, dropped capabilities, read-only filesystem, runtime default seccomp profile."*
+
+### Real CVE example (runc container escape)
+> *"runc CVE-2024-21626 was a container escape bug that let an attacker break out of the container onto the host filesystem. Even if my image scanning missed it, the pod security context would still constrain what the attacker could do — they'd land in a non-root, read-only, capability-stripped environment with seccomp filtering syscalls."*
+
+### Pod security as backup gate
+> *"Pod security context is the backup layer when image scanning misses something. CVEs in third-party libraries get discovered weeks or months after release. Hardened pod security buys me time — even if a CVE-laden image somehow ships, the attacker hits a wall."*
+
+---
+
+## Phase 2 — Least-Privilege IAM
+
+### The 3 IAM patterns
+> *"My cost-ops IAM role uses three patterns across six statements: ARN scoping where AWS supports resource-level permissions, tag-based conditions where ARNs aren't enough, and documented exceptions where AWS APIs force a `*`. Three patterns, no `*` left unjustified."*
+
+### Attribute-Based Access Control (ABAC)
+> *"ABAC means permissions controlled by tags, not just ARNs. My EC2 Start/Stop statement uses `Resource: instance/*` but a Condition block requires `ec2:ResourceTag/Role = "github-self-hosted-runner"`. AWS-recommended modern IAM pattern — more scalable than maintaining explicit ARN lists."*
+
+### Tag-based IAM conditions
+> *"My GitHub Actions role can stop and start EC2 instances, but only those tagged `Role=github-self-hosted-runner` via a Condition block. Even if the role were assumed maliciously, the blast radius is one EC2 instance — not my entire fleet."*
+
+### ARN-scoped IAM statements
+> *"Every statement in my cost-ops policy is scoped to specific ARNs — the five budget ARNs, the one SNS topic, the specific EKS cluster and nodegroup pattern. Where I had to use `*` (Cost Explorer doesn't support resource-level), I documented the exception with a `trivy:ignore: AVD-AWS-0057` comment and a justification."*
+
+### trivy:ignore with reasoning
+> *"When a Trivy rule has to be suppressed, I document WHY with an inline comment. `trivy:ignore: AVD-AWS-0057` plus 'Cost Explorer API requires *' creates an audit trail — a justified exception, not silent suppression. Auditors want documented reasoning, not blind overrides."*
+
+### Trivy as continuous IAM check
+> *"My entire IAM policy is enforced in CI by Trivy as a continuous check. If I ever accidentally loosen a permission, widen a resource scope, or remove a condition, the workflow fails. Security policy as code, with the gate built into the deployment pipeline."*
+
+### Narrow EKS actions (what the role CANNOT do)
+> *"My EKS scaling statement has only four actions: DescribeCluster, DescribeNodegroup, ListNodegroups, UpdateNodegroupConfig. The role CANNOT delete the cluster, create new nodegroups, modify cluster security groups, or rotate the API endpoint. Defining what a role can't do is as important as defining what it can."*
+
+---
+
+## Phase 3 — Private EKS + Self-Hosted Runner
+
+### Why private EKS endpoint (Defense in Depth)
+> *"I made the EKS API endpoint private-only as a defense-in-depth measure. Even with strict IAM, network controls catch what IAM doesn't — DDoS against the kube-apiserver, CVE exploitation like CVE-2018-1002105 which allowed unauthorized privilege escalation through the API server proxy, and stolen-credential abuse from outside the network. The Capital One 2019 breach is the canonical example — strict IAM didn't save them because credentials were used from the public internet after SSRF exfiltration."*
+
+### Network + IAM as separate defense layers
+> *"IAM defends against authorized misuse — what an authenticated user can do. Network controls defend against unauthorized reach — DDoS, CVE exploitation, reconnaissance, and stolen-credential abuse from outside the network. Removing either layer creates a single point of failure. Defense in depth requires both."*
+
+### Self-hosted runner architecture
+> *"My self-hosted runner is an EC2 instance inside my VPC — Amazon Linux 2023, IMDSv2 required, GP3 encrypted root volume, security group locked to my IP via GitHub Secrets, IAM role scoped to one SSM parameter, tagged with `Role=github-self-hosted-runner` for ABAC. It auto-registers with GitHub via user data script and runs as a long-lived service polling GitHub for jobs."*
+
+### Why self-hosted instead of GitHub-hosted
+> *"GitHub-hosted runners live on Azure's public internet — they can't reach my private EKS endpoint. My self-hosted runner lives inside my VPC, so it can reach the private endpoint. That's the entire reason for having a self-hosted runner — to bridge the public job-posting board (GitHub) with my private cluster (EKS)."*
+
+### Long-lived runner vs ephemeral
+> *"My runner is long-lived, not ephemeral — the EC2 stays running 24/7. Booting an EC2 per-job would waste 2 minutes per workflow run. After each job, the runner returns to idle waiting for the next one. For higher-security environments, ephemeral runners that terminate after each job exist, but they're more complex to set up and cost more in startup overhead."*
+
+### IMDSv2 — defending against SSRF
+> *"`http_tokens = required` forces IMDSv2-only mode. IMDSv1 was a simple GET request with no authentication — any process on the EC2 could query metadata and steal IAM credentials. IMDSv2 requires a session token first via PUT request with custom headers. Most SSRF attacks can't do PUT or custom headers, so IMDSv2 breaks the credential-theft chain. The Capital One 2019 breach would not have worked against IMDSv2."*
+
+### EBS volume encryption with KMS
+> *"My runner's root EBS volume is GP3 encrypted with KMS. AWS transparently encrypts blocks on write and decrypts on read — no application changes. Protects against snapshot exfiltration, stolen disks, and AWS internal access. Required by HIPAA, PCI-DSS, SOC2, GDPR — a compliance auditor will flag any unencrypted EBS volume immediately."*
+
+### ABAC via Role tag
+> *"My runner EC2 is tagged `Role=github-self-hosted-runner`. My Phase 2 cost-ops IAM policy uses this tag in a Condition block to scope EC2 Start/Stop permissions. Even though the policy's Resource is `instance/*`, the Condition narrows it to instances with this specific tag. Blast radius: one EC2 instance, not my entire fleet. That's Attribute-Based Access Control — permissions controlled by tags, not just ARNs."*
+
+### 5-phase PAT lifecycle
+> *"The PAT goes through five phases: creation on GitHub.com with `repo` scope, storage in SSM Parameter Store as SecureString encrypted at rest, retrieval by the EC2 via IAM role using IMDSv2-protected `ssm:GetParameter`, usage via the 2-step auth dance (PAT → registration token → register runner), and rotation by updating the Terraform variable and revoking the old PAT on GitHub."*
+
+### 2-step auth dance (PAT → registration token)
+> *"The runner does NOT use the PAT directly to register. It does a 2-step auth dance: use the PAT to call GitHub's API and get a short-lived registration token, then use THAT token to register the runner. The PAT is forgotten after this step — never lives on the runner's disk past initial registration. Blast radius reduction: if the runner is compromised post-registration, the attacker finds only an expired registration token, not the PAT."*
+
+### SSM Parameter Store SecureString
+> *"My runner's PAT lives in AWS SSM Parameter Store as a SecureString — encrypted at rest with KMS. The runner's IAM role has a single permission: `ssm:GetParameter` on this one specific parameter ARN. Least privilege at the secret level. Even if the runner is compromised, the attacker can only read this one parameter, not any other SSM secret in the account."*
+
+### VPC interface endpoints — FinOps tradeoff
+> *"I evaluated VPC interface endpoints for SSM to keep PAT-fetch traffic fully inside AWS's private network — three endpoints: `ssm` for the Parameter Store API, `ssmmessages` for the SSM agent channel, and `ec2messages` for command responses. The math: $8 each × 3 = $24/month, which exceeded my $20 monthly budget. Made a deliberate FinOps tradeoff: kept the runner in a public subnet with restricted egress. Commented out the endpoint code as the documented production upgrade path."*
+
+### Cost-over-isolation tradeoff
+> *"In a regulated production environment — banking, healthcare, defense — I'd budget for those VPC endpoints. Portfolio scope made the cost-over-isolation tradeoff acceptable, and the decision is documented. The pattern: know the right architecture, evaluate the cost, make the portfolio-appropriate compromise, document the tradeoff so future-me knows the upgrade path."*
+
+### Helm-in-CI pain pattern
+> *"Helm-in-CI is genuinely hard because Helm's state model — releases, secrets, lockfiles — assumes a long-running interactive session where a human can intervene. CI runs are atomic and short-lived; they must succeed or fail definitively. A hung Helm install equals a stuck CI job equals a blocked PR for hours. I had 8 commits between March 17-20 chasing this with four fixes: preflight `helm repo update`, `cancel-in-progress` concurrency control, stale release lockfile cleanup, and proper `--timeout` flags."*
+
+### Argo CD Helm support (modern upgrade path)
+> *"The modern alternative to Helm-in-CI is Argo CD's Helm support — it manages releases declaratively via GitOps. Create Argo CD Application CRDs for each chart, use the App-of-Apps pattern so one parent application discovers all child apps, and Argo CD reconciles releases automatically. CI becomes one line: `kubectl apply -f _root.yaml` once. Upgrades are just YAML edits in git — no CI Helm commands, no lockfile races, no hung installs."*
+
+### GitHub PAT → GitHub Apps (modern upgrade path)
+> *"The modern upgrade path beyond PATs is GitHub Apps — they use short-lived JWTs instead of long-lived PATs. Apps eliminate the long-lived secret problem entirely. For production scale, I'd migrate to GitHub Apps for runner registration."*
+
+---
+
+## Phase 4 — Bootstrap Stabilization Marathon
+
+### The infra-bootstrap workflow (overall)
+> *"My infra-bootstrap is 635 lines, runs in ~22 minutes — a one-click that takes the platform from `terraform destroy` to fully running Petclinic. It solves 5 problems simultaneously: sequencing, concurrency, idempotency, stale state recovery, auth expiration, and diagnostics on failure."*
+
+### Bootstrap paradox (two-job architecture)
+> *"My bootstrap has two jobs because of the bootstrap paradox. prepare-runner on GitHub-hosted wakes my self-hosted EC2 runner — the self-hosted runner can't boot itself. Then bootstrap runs on the self-hosted runner because it needs to reach the private EKS endpoint, which GitHub-hosted runners can't reach."*
+
+### Targeted Terraform apply (chicken-and-egg fix)
+> *"prepare-runner uses `terraform apply -target=` flags to create JUST the VPC and runner EC2, not the full stack. Full apply needs to run from inside the VPC, but the VPC and runner have to exist first. Targeted apply solves that ordering."*
+
+### Workflow concurrency
+> *"`concurrency: terraform-${{ github.repository }}` with `cancel-in-progress: false` serializes Terraform workflows. If a second bootstrap is triggered, it WAITS — doesn't cancel — because killing terraform mid-apply would corrupt the state file."*
+
+### Cold-start vs warm-start
+> *"Cold-start paths reveal bugs that warm-start hides — every chicken-and-egg surfaces at once because nothing exists yet. Bringing up an empty AWS account exposes assumptions I didn't even know I was making."*
+
+### Idempotency framework (3 step types)
+> *"My bootstrap is idempotent by design. Every step is one of three types: declarative apply (terraform/kubectl/helm), preflight-guarded change (status check before action), or read-only check (`kubectl wait`, diagnostic dumps). No unguarded one-time actions."*
+
+### Helm preflight cascade (recovery pattern)
+> *"Every Helm install wraps a status check. If the release is in `pending-install` or `pending-upgrade`, try `helm rollback`, if that fails do `helm uninstall`, then `helm upgrade --install`. Crashed Helm releases auto-recover."*
+
+### ALB webhook stale state recovery
+> *"The ALB Controller installs admission webhooks protected by TLS. When Helm crashes mid-install, the webhook configurations stay (they're cluster-scoped) but the TLS Secret can be missing. Every kubectl apply afterwards fails with TLS errors — the cluster is effectively locked. I detect with `kubectl apply --dry-run=server` and recover with a nuke-and-reinstall cascade — delete webhook configs, TLS secret, webhook service, and deployment, all with `--ignore-not-found` for idempotency, then `helm upgrade --install` fresh."*
+
+### Stuck namespace force-finalize
+> *"If the petclinic namespace is stuck in `Terminating` from a previous failed deploy with finalizers, my workflow waits up to 5 minutes for natural cleanup, then force-finalizes via `jq + kubectl replace --raw /api/v1/namespaces/petclinic/finalize` to clear finalizers. After cleanup, recreates the namespace."*
+
+### Three chicken-and-eggs
+> *"My project has three chicken-and-egg problems: the runner can't boot itself (GitHub-hosted wakes it up), the IAM OIDC Identity Provider can't be recreated if it already exists (conditional create with `count = var.X == "" ? 1 : 0`), and IRSA needs ordering — EKS cluster → OIDC issuer URL → IAM OIDC provider → IAM role → ServiceAccount annotation (`depends_on` chains + staged execution)."*
+
+### EKS Access Entries (modern aws-auth)
+> *"EKS Access Entries are the modern API for granting IAM principals Kubernetes access — replaces the old aws-auth ConfigMap. I attach `AmazonEKSClusterAdminPolicy` to my bootstrap CI role so kubectl works from the runner. Without this, AWS IAM accepts my role but EKS rejects it with 'Unauthorized.'"*
+
+### STS credential refresh mid-workflow
+> *"My bootstrap takes 22 minutes; STS credentials expire after 1 hour. I add a 'Refresh AWS credentials before readiness checks' step that re-authenticates via OIDC — fresh creds for the final stages. Without this, the last few kubectl commands would fail with expired token errors."*
+
+### Secrets Manager → K8s Secret bridge
+> *"My MySQL credentials live in AWS Secrets Manager. The bootstrap fetches them via `aws secretsmanager get-secret-value`, then creates a Kubernetes Secret with the values. Pods reference the K8s Secret via `secretKeyRef`. The bridge step is part of why ordering matters — the K8s Secret must exist before pods start."*
+
+### `if: failure()` diagnostic dumps
+> *"Every potential-failure section in my bootstrap has an `if: failure()` step that dumps pods, logs, events, secrets, and service accounts — all with `|| true` after each command so one failed dump doesn't stop the others. When the workflow fails at 2 AM, the entire debugging context is in the GitHub Actions logs. No SSH into the runner."*
+
+### workflow_run chaining (e2e-smoke)
+> *"My `e2e-smoke.yaml` workflow auto-triggers when `infra-bootstrap.yaml` succeeds — `on: workflow_run: workflows: [infra-bootstrap]: types: [completed]` plus an `if: github.event.workflow_run.conclusion == 'success'` guard. Three curl calls against the ALB validate the full path from public internet to ALB to Ingress to api-gateway to backend service to RDS."*
+
+### The March 22 marathon (STAR opener)
+> *"By March 21 I had all the pieces working separately. On March 22 I set out to build one-click bootstrap that takes the platform from `terraform destroy` to fully running Petclinic. I expected a few hours. I was wrong — it took the whole day and 20+ commits across 5 chapters: Identity, Certificates, Order, Paradox, Cleanup. Every recovery pattern in the resulting 635-line workflow came from a specific failure I debugged that day, not from theory."*
+
+---
+
+## Phase 5 — Argo Rollouts Canary Deployment
+
+### Why canary (progressive delivery)
+> *"Canary deployment is progressive delivery — traffic shifts in phases instead of all-or-nothing. My api-gateway runs as an Argo Rollouts canary because static CI checks (Sonar, Trivy, JaCoCo) catch CODE issues but not RUNTIME regressions like 5xx error spikes under real traffic. Canary catches those at 20% blast radius instead of 100% — 5x reduction in user impact."*
+
+### Argo Rollouts vs Deployment (`kind: Rollout`)
+> *"My api-gateway uses `kind: Rollout` (Argo Rollouts CRD), not `kind: Deployment`. A standard Deployment only supports RollingUpdate — bumps replicas with no traffic control. Rollout is pluggable: canary or blue-green strategies, integrated traffic management, AnalysisTemplate hooks for objective rollout gates."*
+
+### The 3-service pattern
+> *"Argo Rollouts canary needs 3 Services: `api-gateway-stable` routes to current version pods, `api-gateway-canary` routes to new version pods, `api-gateway` root that the Ingress targets. ALB splits traffic between stable and canary based on the Rollout's `setWeight`."*
+
+### ALB trafficRouting integration
+> *"My Rollout spec has `trafficRouting.alb` pointing at my `frontend-proxyr` Ingress. Argo Rollouts uses TargetGroupBindings from the AWS Load Balancer Controller to programmatically shift traffic between the stable and canary target groups. No DNS changes, no manual ALB edits — it's all controlled by setWeight values in the Rollout spec."*
+
+### The 4 canary steps
+> *"My canary steps are: `setWeight: 20` first (20% traffic to canary pods), `pause: { duration: 2m }` (let Prometheus scrape data), `analysis: ...` (PromQL queries via AnalysisTemplate), then `pause: {}` (indefinite manual approval). Net: 5 minutes at 20% before manual review."*
+
+### AnalysisTemplate as a reusable CRD
+> *"My AnalysisTemplate is `kind: AnalysisTemplate` with two args — `prometheus-address` and `canary-service`. Args make it reusable: the same template can analyze `vets-service-canary` or `customers-service-canary` just by passing different args. Single template, multiple consumers."*
+
+### PromQL success rate query
+> *"My first metric is canary-success-rate: `sum(rate(http_server_requests_seconds_count{service=canary-svc, status!~"5.."}[2m]))` divided by `clamp_min(sum(rate(... total ...)), 0.001)`. The `status!~"5.."` is a PromQL regex for 'status NOT matching 5xx'. Success condition: `result[0] >= 0.95`."*
+
+### PromQL 5xx rate query
+> *"Second metric is canary-5xx-rate: same shape but `status=~"5.."` in the numerator — matches 5xx (bad) responses. Success condition: `result[0] <= 0.01`. Both metrics together cover 'good requests are healthy' AND 'bad requests are minimal' — independent signals."*
+
+### Why 95% / 1% thresholds
+> *"95% success rate is the standard SLA floor for HTTP services. 1% 5xx rate is industry-typical for healthy services. Both expressed as decimals between 0 and 1 because PromQL rate ratios are decimals, not percentages. The boundary direction matters: success ≥ 0.95 (pass), 5xx ≤ 0.01 (pass)."*
+
+### `failureLimit: 1` (strict abort)
+> *"`failureLimit: 1` means one failed metric check aborts the rollout. Strict — appropriate for a portfolio where false-positive aborts are acceptable but false-negative promotes are not. Production with noisier traffic might bump to `failureLimit: 3` for noise tolerance."*
+
+### `clamp_min` divide-by-zero protection
+> *"`clamp_min(..., 0.001)` prevents division by zero when no traffic has hit the canary yet — returns a minimum denominator of 0.001 so the PromQL query doesn't blow up before the canary even gets traffic. Defensive math."*
+
+### `pause: 2m` vs `pause: {}` (timed vs indefinite)
+> *"Two pause types in my Rollout. `pause: { duration: 2m }` auto-resumes after the timer — used for pre-analysis data collection. `pause: {}` with empty braces is INDEFINITE — waits forever until a human runs `kubectl argo rollouts promote api-gateway`. Different semantics, same `pause` keyword."*
+
+### Two-layer defense (auto + manual)
+> *"Two-layer defense — automated catches definite failures with objective thresholds; humans catch 'this looks weird' — slow memory growth, unusual latency distributions, patterns that don't trip thresholds but feel off. Automation should EARN trust over time, not be granted it. For portfolio scope, the manual gate is appropriate; for a mature pipeline with comprehensive metrics, I'd remove it."*
+
+### Rollback mechanics (immediate ALB shift)
+> *"On abort, ALB shifts traffic from 80/20 stable/canary back to 100% stable in seconds — not phases. The old stable pods were never scaled down during canary, so 'rollback' is just 'stop sending new traffic to canary.' No pod restart, no cold-start latency. In-flight canary requests drain naturally."*
+
+### AnalysisRun vs AnalysisTemplate (debugging)
+> *"AnalysisTemplate is the SPEC (the YAML file I defined). AnalysisRun is an INSTANCE — one per rollout attempt. To debug a failed analysis, I run `kubectl describe analysisrun -n petclinic` (not analysistemplate) — shows the actual PromQL query results, which metric failed, which value triggered the abort."*
+
+### The 4 diagnostic commands
+> *"My canary debug toolkit: `kubectl argo rollouts get api-gateway` shows current state + abort reason; `kubectl argo rollouts get api-gateway -w` for live watch; `kubectl describe analysisrun -n petclinic` for PromQL results; `kubectl argo rollouts abort api-gateway` to manually kill a rollout."*
+
+### Canary vs Blue-Green tradeoff
+> *"I chose canary over blue-green for three reasons: cost (blue-green doubles infra; my budget is $20/month), blast radius (canary catches at 20% — 5x reduction), and automated analysis fits naturally with PromQL gates at intermediate weights. The tradeoffs I accepted: blue-green has INSTANT rollback (env flip vs traffic shift), and blue-green handles DB schema migrations easier because Green can be tested in isolation."*
+
+### DB schema migration tradeoff
+> *"Canary keeps old and new versions running simultaneously against the same DB — so schema changes must be backward-compatible. Adding columns works, renaming or dropping requires a 3-4 deploy expand/contract pattern: add new column → write to both → backfill → drop old. Blue-Green sidesteps this because old and new never run simultaneously; you migrate atomically during cutover. My canary is on api-gateway which is stateless — DB problem doesn't bite me. If I extended canary to DB-touching services, I'd need expand/contract or Blue-Green for that service."*
+
+### The verify-infra-bootstrap gate
+> *"My `api-gateway-canary.yaml` workflow has a `verify-infra-bootstrap` job that queries GitHub's API for the latest infra-bootstrap conclusion and fails if it wasn't 'success'. Don't deploy canary to a broken platform. Deployment dependency pattern — used by Netflix's Spinnaker."*
+
+### The canary workflow trigger
+> *"My canary workflow triggers on `push: branches: [main]` with `paths` filter on `kubernetes/api-gateway/**`. When my CI merges a PR with a new image tag (committed by the updatek8s bot), the canary workflow auto-fires. Plus `workflow_dispatch` for manual rollouts of unchanged manifests."*
+
+---
+
+## Phase 6 — RDS + Secrets Manager
+
+### The keystone flag
+> *"My RDS uses `manage_master_user_password = true` — AWS generates the master password and stores it in Secrets Manager. I never see the value, never write it in Terraform, never commit it to git. The only thing I reference is the secret ARN."*
+
+### The 3-layer credential model
+> *"Three layers: Secrets Manager owns the truth, the `mysql-credentials` K8s Secret in the petclinic namespace is the delivery vehicle, and pod env vars are the consumption point. No password in git, Terraform code, tfstate, or pod manifests."*
+
+### The 7-step credential chain
+> *"Terraform creates RDS → AWS generates password → bootstrap fetches via `aws secretsmanager get-secret-value` → `jq` extracts fields → `kubectl apply` creates K8s Secret idempotently → `envFrom: secretRef` injects env vars → Spring Boot's relaxed binding constructs the JDBC connection."*
+
+### Why RDS over in-cluster MySQL (5-finger framework)
+> *"Five managed-service wins: backup (automated snapshots vs cron + mysqldump), encryption (one flag vs PVC + KMS dance), HA (`multi_az = true` vs Galera weeks of work), patching (maintenance window vs manual pod roll), monitoring (CloudWatch free vs build mysqld_exporter yourself). TCO favors managed — $144/year buys 20-40 hours of saved engineering work."*
+
+### When in-cluster MySQL is the right call
+> *"Three cases: learning environments where ops experience is the goal, strict data residency requirements where the DB must live in cluster for compliance, or regions where RDS isn't available. For production-style portfolio, RDS is the deliberate choice."*
+
+### The 5-layer network defense (V-S-S-E-A)
+> *"VPC private network → private subnets with no internet gateway route → security group allowing only port 3306 from VPC CIDR → KMS encryption at rest + TLS in transit → password authentication from Secrets Manager. Five independent layers, defense in depth — each layer assumes the previous one failed."*
+
+### `publicly_accessible = false` framing
+> *"`publicly_accessible = false` means no public IP exists at the routing layer. Combined with private subnets, RDS is unreachable from the public internet even if a security group is misconfigured. Two layers of routing-level protection."*
+
+### Customer-managed KMS justification
+> *"Customer-managed KMS at $1/month buys three things: explicit key policy control over who can decrypt, compliance posture for SOC2/HIPAA/PCI which all require CMK, and cross-account key sharing if I ever need it. AWS-managed `aws/rds` is free but fails compliance audits."*
+
+### Multi-AZ cost framing
+> *"`multi_az = false` is the biggest single cost saver in my spec. Multi-AZ provisions a synchronous standby in a second AZ and doubles RDS cost from $12 to $24/month. The tradeoff I accepted: ~60-second AZ failover with multi-AZ vs 10-20 minute instance replacement on single-AZ. Portfolio has no real users — acceptable. Production: mandatory."*
+
+### The destroy-friendly 3-flag combo
+> *"`backup_retention_period = 1` + `skip_final_snapshot = true` + `deletion_protection = false` — three flags that make `terraform destroy` painless, leaving no traces. The portfolio cost saver is destroy-friendliness, not storage. Production flips all three: 7-day retention, final snapshot enabled, deletion protection on."*
+
+### Cost decisions are stage-appropriate
+> *"Cost decisions are stage-appropriate, not permanent. Each lever has a specific upgrade signal — sustained CPU above 50% triggers instance upgrade, real SLA commitment triggers multi-AZ, real users with non-replaceable data triggers backup retention bump. I'd rather increase operational cost than pay on SLA breaches that would cost more in damage."*
+
+### The rotation delayed-failure mode (THE killer insight)
+> *"Rotation breaks pods LATER, not immediately. Existing connections survive because MySQL doesn't re-validate the password mid-session. HikariCP pool stays alive. The break happens at the NEXT pod restart — OOM, eviction, scale-up, image update — when HikariCP tries to establish a new connection with the now-stale password."*
+
+### The exact rotation error
+> *"`Access denied for user 'admin'@'...' (using password: YES)` — HikariCP logs this, Spring Boot's `/actuator/health` returns DOWN, Kubernetes readiness probe fails, pod removed from Service endpoints, user requests return 503."*
+
+### The rotation blast radius timeline
+> *"T=0 invisible, monitoring green. T+hours, first eviction causes first pod failure. T+days, cascading as more pods cycle. By the next rotation 7 days later, the entire DB-dependent fleet — customers, visits, vets — has cycled and failed."*
+
+### Manual rotation recovery (3 steps)
+> *"Re-run the bootstrap workflow's secret-fetch step — `aws secretsmanager get-secret-value` always returns the current version, and the idempotent `kubectl apply` pattern refreshes the K8s Secret. Then `kubectl rollout restart deployment -n petclinic` to force pods to pick up the new env vars. Then verify with `kubectl get pods` and `kubectl logs`. Total recovery: 5-10 minutes manually."*
+
+### The production fix (External Secrets Operator)
+> *"External Secrets Operator is the production fix. ESO watches Secrets Manager via IRSA, syncs the K8s Secret on rotation, and Reloader detects the Secret hash change to trigger rolling restarts via a deployment annotation. Zero manual ops on rotation — fully automatic."*
+
+### envFrom vs env.valueFrom
+> *"`envFrom: secretRef` bulk-injects every key from the Secret as env vars with the same name — cleaner for our case where Spring Boot expects specific names. `env.valueFrom.secretKeyRef` is the per-key explicit form, useful if you need to remap a Secret key to a different env var name."*
+
+### Spring Boot relaxed binding
+> *"Spring Boot's relaxed binding auto-maps SNAKE_CASE env vars to dotted property names — `SPRING_DATASOURCE_USERNAME` becomes `spring.datasource.username`, which the JDBC auto-configuration picks up. No application code touches the password."*
+
+### Idempotent K8s Secret creation
+> *"My bootstrap creates the K8s Secret using `kubectl create secret generic ... --dry-run=client -o yaml | kubectl apply -f -`. The dry-run pipe pattern makes it idempotent — works whether the Secret exists or not, no errors on re-runs. Senior pattern for bootstrap scripts."*
+
+### The HikariCP connection-pool behavior
+> *"HikariCP authenticates once per connection establishment, not per query. Connection pooling exists specifically to avoid the cost of repeated auth handshakes — sub-millisecond query latency vs ~10ms for connect+auth+query. The downside is exactly the rotation problem: stale credentials aren't caught until a connection is recycled."*
+
+### RDS Proxy for connection scaling
+> *"RDS Proxy sits between pods and RDS, multiplexing pod-side connections into fewer DB-side connections. For Petclinic with 6 services each maintaining HikariCP pools of 10-20, total connections approach 120 — close to the t4g.micro limit. RDS Proxy at ~$15/month isn't worth it for portfolio; for production with more services or autoscaling, it's standard."*
+
+---
+
+## GitHub Actions Mechanics
+
+### What's a runner?
+> *"A runner is the server that actually executes a workflow's jobs. GitHub-hosted runners are ephemeral Ubuntu VMs provisioned per job — free for public repos. Self-hosted runners are machines I provision myself; I use one in my project specifically because my EKS cluster has a private API endpoint that GitHub-hosted runners on the public internet can't reach."*
+
+### Trivy installation
+> *"Trivy is referenced via the official GitHub Action `aquasecurity/trivy-action@v0.25.0` — pinned version, no persistent install. The action downloads the Trivy CLI binary into the ephemeral runner on each workflow run."*
+
+### SonarCloud installation
+> *"SonarCloud is the SaaS at sonarcloud.io plus the Maven `sonar:sonar` plugin auto-fetched from Maven Central. Token, host URL, org, and project key live as GitHub Secrets; the Maven plugin uses them to upload scan results."*
+
+### OIDC auth (with AWS)
+> *"OIDC replaces long-lived AWS access keys with short-lived federated credentials. My workflow requests a signed JWT from GitHub, hands it to AWS STS via `AssumeRoleWithWebIdentity`, and gets back one-hour credentials. The trust policy condition restricts the role by repo and branch via the JWT's `sub` claim, so even if the role ARN leaked, attackers can't assume it from a different repo."*
+
+### GitHub Actions cron
+> *"GitHub Actions cron is UTC-only with no native timezone support. I use a two-cron pattern — one for CST, one for CDT — plus an internal `TZ=America/Chicago` time check that exits early if the local hour doesn't match. This ensures the workflow fires exactly once per day at 11 PM Chicago, regardless of daylight saving."*
+
+---
+
+## Power Phrases
+
+Drop these anywhere in any interview. Each signals senior-level thinking:
+
+| Topic | Phrase |
+|---|---|
+| GitOps | *"Git is the source of truth; the cluster is a downstream artifact"* |
+| GitOps | *"CI builds and updates git; CD deploys from git"* |
+| Rollback | *"Rollback becomes `git revert`"* |
+| Security | *"The registry is a trust boundary"* |
+| Security | *"Defense in depth — different attack surfaces"* |
+| Security | *"Scan-before-push is the gate; scan-after-push is visibility"* |
+| Cost | *"Cost is a CI gate, not a dashboard people forget to check"* |
+| Cost | *"FinOps as code"* |
+| IAM | *"Attribute-Based Access Control via tag conditions"* |
+| IAM | *"Trivy:ignore with reasoning — audit trail, not silent suppression"* |
+| OIDC | *"Federated credentials, not stored secrets"* |
+| Pods | *"Pod Security Standards Restricted profile"* |
+| Quality | *"`wait=true` makes the gate enforceable, not advisory"* |
+| Idempotency | *"Idempotent recovery — every step is safe to re-run"* |
+| Compliance | *"NIST SSDF / CISA recommended pattern"* |
+| Architecture | *"YAGNI — proved the pattern in one service before templatizing"* |
+| Operations | *"One click brings the whole platform up; one click tears it down"* |
+| Drift | *"Argo CD detects drift in real time"* |
+| Multi-cluster | *"Same git, different reconcilers"* |
+| Image identity | *"Run_id is the canonical link between an image and its provenance"* |
+
+---
+
+## "Famous CVEs" to namedrop
+
+- **Log4Shell** — `CVE-2021-44228` — log4j2 RCE, CVSS 10.0, Dec 2021
+- **Spring4Shell** — `CVE-2022-22965` — Spring Framework RCE
+- **runc container escape** — `CVE-2024-21626` — early 2024 K8s/Docker
+- **Heartbleed** — `CVE-2014-0160` — OpenSSL memory exposure
+
+---
+
+## "Famous attacks" to mention
+
+- **Pwn Request** — Forked PR modifies workflow file to exfiltrate the bot's GITHUB_TOKEN
+- **Supply chain attack** — Compromised upstream dependency injects malicious code (Log4Shell, SolarWinds, xz utils)
+- **Container escape** — runc bug lets a process inside a container access the host filesystem
+
+---
+
+## Future updates
+
+When you complete more phases, add their one-liners here. Suggested order:
+- Phase 3: Private EKS + self-hosted runner
+- Phase 4: Bootstrap stabilization
+- Phase 5: Argo Rollouts canary
+- Phase 6: RDS + Secrets Manager
+- Phase 7: AIOps foundation
+- Phase 8: AIOps Service + Streamlit UI

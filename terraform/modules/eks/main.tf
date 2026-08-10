@@ -22,16 +22,79 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_role_attachment" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "eks_secrets_kms_key" {
+  statement {
+    sid    = "EnableRootPermissions"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AllowEksClusterRoleUseOfKey"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.eks_cluster_role.arn]
+    }
+
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ListGrants",
+      "kms:CreateGrant",
+      "kms:ReEncrypt*"
+    ]
+    resources = ["*"]
+  }
+}
+
 resource "aws_kms_key" "eks_secrets" {
   description             = "KMS key for EKS secrets encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.eks_secrets_kms_key.json
   tags                    = var.tags
 }
 
 resource "aws_kms_alias" "eks_secrets" {
   name          = "alias/${var.cluster_name}-eks-secrets"
   target_key_id = aws_kms_key.eks_secrets.key_id
+}
+
+resource "aws_iam_role_policy" "eks_cluster_kms" {
+  name = "${var.cluster_name}-eks-cluster-kms"
+  role = aws_iam_role.eks_cluster_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ListGrants",
+          "kms:CreateGrant",
+          "kms:ReEncrypt*"
+        ]
+        Resource = aws_kms_key.eks_secrets.arn
+      }
+    ]
+  })
 }
 
 resource "aws_eks_cluster" "main" {
@@ -61,7 +124,8 @@ resource "aws_eks_cluster" "main" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster_role_attachment
+    aws_iam_role_policy_attachment.eks_cluster_role_attachment,
+    aws_iam_role_policy.eks_cluster_kms
   ]
 }
 

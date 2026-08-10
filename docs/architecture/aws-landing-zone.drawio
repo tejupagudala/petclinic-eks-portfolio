@@ -1,0 +1,119 @@
+<mxfile host="app.diagrams.net" version="24.7.17" type="device">
+  <diagram id="landing-zone" name="Account &amp; Governance">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="petclinic-eks-portfolio — Account, Identity &amp; Governance (current state)" style="text;html=1;align=left;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="sub" value="Single AWS account 479407618698 · us-east-1 · everything provisioned by Terraform, no console clicks" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontColor=#5A6C86;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1000" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- GitHub side -->
+        <mxCell id="gh" value="GitHub — tejupagudala/petclinic-eks-portfolio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#5A6C86;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="330" height="480" as="geometry" />
+        </mxCell>
+        <mxCell id="ghwf" value="Workflows&#10;&#10;ci.yaml — build · test · SonarCloud&#10;Trivy · push image · bump tag&#10;&#10;infra-bootstrap.yaml — terraform apply&#10;+ Argo Rollouts + monitoring + ALB ctrl&#10;&#10;api-gateway-canary.yaml&#10;e2e-smoke.yaml&#10;non-prod-stop / non-prod-start (cron)&#10;cost-report-daily.yaml&#10;infra-destroy.yaml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6C86;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="140" width="290" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="ghsec" value="Repo secrets (no long-lived AWS keys)&#10;DOCKER_USERNAME / DOCKER_TOKEN&#10;SONAR_* · AWS_ROLE_ARN&#10;AWS_ROLE_ARN_INFRA · EKS_CLUSTER_NAME" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6C86;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="390" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="dockerhub" value="Docker Hub — image registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6C86;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="490" width="290" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="acct" value="AWS Account — 479407618698 (us-east-1)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=13;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_account;strokeColor=#CD2264;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#CD2264;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="430" y="100" width="1160" height="700" as="geometry" />
+        </mxCell>
+
+        <!-- Identity -->
+        <mxCell id="idbox" value="Identity &amp; Access — keyless, short-lived credentials only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6F6;strokeColor=#CD2264;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;align=left;spacingLeft=12;" vertex="1" parent="acct">
+          <mxGeometry x="30" y="50" width="1100" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="oidcgh" value="GitHub OIDC Provider&#10;token.actions.githubusercontent.com&#10;&#10;Trust scoped to repo + branch main.&#10;Workflows exchange a JWT for temporary&#10;STS credentials — nothing stored." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CD2264;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="55" y="95" width="250" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="roles" value="IAM Roles assumed by CI&#10;&#10;AWS_ROLE_ARN — app deploy&#10;AWS_ROLE_ARN_INFRA — terraform apply&#10;github_actions_cost_ops — scale nodegroup,&#10;read Cost Explorer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CD2264;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="330" y="95" width="250" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="eksoidc" value="EKS OIDC Provider → IRSA&#10;&#10;aws_iam_openid_connect_provider.eks&#10;Pods assume roles via service account,&#10;e.g. kube-system/aws-load-balancer-controller&#10;→ no node-level IAM sharing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CD2264;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="605" y="95" width="260" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="podid" value="EKS Pod Identity Agent&#10;(add-on)&#10;&#10;Used by the&#10;amazon-cloudwatch-observability&#10;add-on role" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CD2264;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="890" y="95" width="215" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="accessentries" value="EKS Access Entries (API auth mode — replaces aws-auth ConfigMap): admin role ARNs + github_actions_cost_ops mapped to AmazonEKSClusterAdminPolicy, cluster scope" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CD2264;fontSize=11;dashed=1;align=left;spacingLeft=10;" vertex="1" parent="acct">
+          <mxGeometry x="55" y="240" width="1050" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- State -->
+        <mxCell id="statebox" value="Terraform State" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2FBF0;strokeColor=#248814;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;align=left;spacingLeft=12;" vertex="1" parent="acct">
+          <mxGeometry x="30" y="370" width="530" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="s3state" value="S3: terraform-demo-eks-state-lock-bucket&#10;key terraform.lock.tfstate&#10;&#10;encrypt = true (KMS)&#10;use_lockfile = true — S3-native locking,&#10;no DynamoDB table needed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#248814;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="55" y="410" width="480" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Cost governance -->
+        <mxCell id="costbox" value="Cost Guardrails (cost_guardrails.tf)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFBF0;strokeColor=#ED7100;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;align=left;spacingLeft=12;" vertex="1" parent="acct">
+          <mxGeometry x="590" y="370" width="540" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="budgets" value="Monthly total budget (~$20)&#10;+ per-service budgets:&#10;EKS · EC2-Other · VPC · ELB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#ED7100;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="615" y="410" width="240" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="anomaly" value="Cost Anomaly Detection&#10;(monitor + daily subscription)&#10;&#10;SNS topic (KMS-encrypted)&#10;→ email alert" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#ED7100;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;" vertex="1" parent="acct">
+          <mxGeometry x="875" y="410" width="230" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tagnote" value="Provider default_tags applied to every resource — makes the per-service budgets and the daily cost report attributable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6C86;fontSize=11;dashed=1;align=left;spacingLeft=10;" vertex="1" parent="acct">
+          <mxGeometry x="30" y="580" width="1100" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="modules" value="Terraform layout:  modules/vpc  ·  modules/eks  ·  root: rds.tf, cost_guardrails.tf, github_runner.tf, cloudwatch_observability.tf" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF6FC;strokeColor=#147EBA;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="acct">
+          <mxGeometry x="30" y="635" width="1100" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Future state -->
+        <mxCell id="future" value="Target state if this went multi-account (not built — talking point, not a claim)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#B0B0B0;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;align=left;spacingLeft=12;dashed=1;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="830" width="1550" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" value="Management Account&#10;Control Tower · Organizations&#10;SCPs · IAM Identity Center" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;fontSize=11;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="65" y="875" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="f2" value="Security OU&#10;Log Archive + Audit accounts&#10;org CloudTrail · Security Hub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;fontSize=11;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="370" y="875" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" value="Infrastructure OU&#10;Network + Shared Services&#10;TGW / ECR shared via RAM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;fontSize=11;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="675" y="875" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" value="Workloads OU&#10;prod / staging / dev accounts&#10;same modules, different tfvars" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;fontSize=11;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="980" y="875" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="f5" value="Sandbox OU&#10;budget-capped, region-locked&#10;auto-nuke" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B0B0B0;fontSize=11;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="1285" y="875" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="fnote" value="Migration path: the vpc/eks modules already take cluster_name + CIDRs as variables, so each account is a new tfvars file + a new backend key. What changes is state layout, OIDC trust per account, and CIDR allocation to avoid overlap." style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=11;align=left;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="65" y="970" width="1500" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- edges -->
+        <mxCell id="e1" value="OIDC federation&#10;(assume role, ~1h creds)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#CD2264;fontSize=11;fontColor=#CD2264;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="ghsec" target="oidcgh">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#CD2264;" edge="1" parent="1" source="oidcgh" target="roles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="terraform apply" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#248814;fontSize=11;fontColor=#248814;" edge="1" parent="1" source="roles" target="s3state">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="push image" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#5A6C86;fontSize=11;" edge="1" parent="1" source="ghwf" target="dockerhub">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
