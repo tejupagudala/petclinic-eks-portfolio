@@ -501,7 +501,7 @@ jobs:
 
       - name: Wait for Argo CD apps to sync
         run: |
-          kubectl -n argocd wait --for=condition=Synced --all applications --timeout=10m
+          kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced --all applications --timeout=10m
           kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy --all applications --timeout=10m
 
       - name: Verify CloudWatch log groups
