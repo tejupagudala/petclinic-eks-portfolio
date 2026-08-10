@@ -317,7 +317,7 @@ jobs:
       - name: Register Argo CD Applications
         run: |
           kubectl apply -f kubernetes/argocd/ -n argocd
-          kubectl -n argocd wait --for=condition=Available deployment/argocd-application-controller --timeout=120s
+          kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=120s
 
       - name: Install Argo Rollouts
         run: |
