@@ -36,15 +36,15 @@ resource "aws_security_group_rule" "eks_to_rds" {
 }
 
 resource "aws_db_instance" "petclinic" {
-  identifier              = "${var.cluster_name}-mysql"
-  engine                  = "mysql"
-  engine_version          = "8.0"
-  instance_class          = var.rds_instance_class
-  allocated_storage       = var.rds_allocated_storage
-  storage_type            = "gp3"
-  storage_encrypted       = true
-  kms_key_id              = aws_kms_key.rds.arn
-  db_name                 = "petclinic"
+  identifier        = "${var.cluster_name}-mysql"
+  engine            = "mysql"
+  engine_version    = "8.0"
+  instance_class    = var.rds_instance_class
+  allocated_storage = var.rds_allocated_storage
+  storage_type      = "gp3"
+  storage_encrypted = true
+  kms_key_id        = aws_kms_key.rds.arn
+  db_name           = "petclinic"
 
   username                    = var.rds_username
   manage_master_user_password = true
