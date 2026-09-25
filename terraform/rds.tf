@@ -13,7 +13,7 @@ resource "aws_kms_alias" "rds" {
 
 resource "aws_db_subnet_group" "petclinic" {
   name       = "${var.cluster_name}-rds-subnet-group"
-  subnet_ids = module.vpc.private_subnet_ids
+  subnet_ids = module.eks_network.data_subnet_ids
 
   tags = var.default_tags
 }
@@ -21,7 +21,7 @@ resource "aws_db_subnet_group" "petclinic" {
 resource "aws_security_group" "rds" {
   name        = "${var.cluster_name}-rds-sg"
   description = "Allow MySQL from EKS workloads"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = module.eks_network.vpc_id
 
   tags = var.default_tags
 }

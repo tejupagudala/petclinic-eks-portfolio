@@ -11,7 +11,7 @@ output "cluster_name" {
 
 output "vpc_id" {
   description = "VPC ID"
-  value       = module.vpc.vpc_id
+  value       = module.eks_network.vpc_id
 }
 
 output "cost_alert_sns_topic_arn" {

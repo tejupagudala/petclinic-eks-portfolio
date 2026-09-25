@@ -44,11 +44,11 @@ jobs:
           unset TF_VAR_aws_auth_role_arns
           terraform -chdir=terraform init -input=false
           terraform -chdir=terraform apply -auto-approve -input=false \
-            -target=module.vpc.aws_vpc.main \
-            -target=module.vpc.aws_subnet.public \
-            -target=module.vpc.aws_internet_gateway.main \
-            -target=module.vpc.aws_route_table.public \
-            -target=module.vpc.aws_route_table_association.public \
+            -target=module.eks_network.aws_vpc.this \
+            -target=module.eks_network.aws_subnet.public \
+            -target=module.eks_network.aws_internet_gateway.this \
+            -target=module.eks_network.aws_route_table.public \
+            -target=module.eks_network.aws_route_table_association.public \
             -target=aws_security_group.github_runner \
             -target=aws_iam_role.github_runner_ec2 \
             -target=aws_iam_role_policy_attachment.github_runner_ssm \
@@ -494,8 +494,6 @@ jobs:
             host: "${RDS_ENDPOINT}"
             url: "jdbc:mysql://${RDS_ENDPOINT}:3306/petclinic?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true"
           EOF
-          kubectl apply -f kubernetes/discovery-server/
-          kubectl apply -f kubernetes/config-server/
           kubectl apply -f kubernetes/customers-service/
           kubectl apply -f kubernetes/visits-service/
 
