@@ -52,8 +52,8 @@ jobs:
           fi
 
           if [ "$CURRENT" = "$TARGET" ]; then
-            echo "Cluster already on target version $TARGET"
-            exit 0
+            echo "Cluster already on target version $TARGET — nothing to do"
+            exit 1
           fi
 
       - name: Set policy to STANDARD before upgrade

@@ -538,8 +538,6 @@ jobs:
       - name: Readiness checks
         run: |
           set -euo pipefail
-          kubectl -n petclinic rollout status deployment/discovery-server --timeout=600s
-          kubectl -n petclinic rollout status deployment/config-server --timeout=600s
           kubectl -n petclinic rollout status deployment/customers-service --timeout=600s
           kubectl -n petclinic rollout status deployment/vets-service --timeout=600s
           kubectl -n petclinic rollout status deployment/visits-service --timeout=600s
