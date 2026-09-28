@@ -16,14 +16,25 @@ eks_public_access_cidrs     = ["75.210.79.3/32"]
 
 
 node_groups = {
-  "demo-node-group" = {
+  system = {
     instance_types = ["t3.small"]
-    capacity_type  = "SPOT"
-    scaling_config = {
-      desired_size = 6
-      max_size     = 6
-      min_size     = 1
-    }
+    capacity_type  = "ON_DEMAND"
+    labels         = { role = "system" }
+    taints         = [{ key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }]
+    scaling_config = { desired_size = 2, max_size = 2, min_size = 1 }
+  }
+  frontend = {
+    instance_types = ["t3.small"]
+    capacity_type  = "ON_DEMAND"
+    labels         = { role = "frontend" }
+    scaling_config = { desired_size = 2, max_size = 3, min_size = 1 }
+  }
+  backend = {
+    instance_types = ["t3.small"]
+    capacity_type  = "ON_DEMAND"
+    labels         = { role = "backend" }
+    taints         = [{ key = "workload", value = "backend", effect = "NO_SCHEDULE" }]
+    scaling_config = { desired_size = 2, max_size = 3, min_size = 1 }
   }
 }
 

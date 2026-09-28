@@ -1,5 +1,6 @@
 
 terraform {
+  required_version = ">= 1.5"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -33,27 +34,44 @@ provider "aws" {
   }
 }
 
-module "vpc" {
-  source = "./modules/vpc"
+# module "vpc" {
+#   source = "./modules/vpc"
 
-  vpc_cidr             = var.vpc_cidr
-  availability_zones   = var.availability_zones
-  private_subnet_cidrs = var.private_subnet_cidrs
-  public_subnet_cidrs  = var.public_subnet_cidrs
-  cluster_name         = var.cluster_name
+#   vpc_cidr             = var.vpc_cidr
+#   availability_zones   = var.availability_zones
+#   private_subnet_cidrs = var.private_subnet_cidrs
+#   public_subnet_cidrs  = var.public_subnet_cidrs
+#   cluster_name         = var.cluster_name
+# }
+
+module "eks_network" {
+  source = "./modules/eks-network"
+
+  name                = var.cluster_name
+  cluster_name        = var.cluster_name
+  vpc_cidr            = var.vpc_cidr
+  availability_zones  = var.availability_zones
+  public_subnet_cidrs = var.public_subnet_cidrs
+  app_subnet_cidrs    = var.private_subnet_cidrs
+  data_subnet_cidrs   = var.data_subnet_cidrs
+  nat_per_az          = var.nat_per_az
+  tags                = var.default_tags
 }
 
 module "eks" {
-  tags   = var.default_tags
   source = "./modules/eks"
+  tags   = var.default_tags
 
   cluster_name            = var.cluster_name
   cluster_version         = var.cluster_version
-  vpc_id                  = module.vpc.vpc_id
-  subnet_ids              = module.vpc.private_subnet_ids
-  node_groups             = var.node_groups
+  cluster_subnet_ids      = module.eks_network.app_subnet_ids
   public_endpoint_enabled = var.eks_public_endpoint_enabled
   public_access_cidrs     = var.eks_public_access_cidrs
+
+  node_groups = {
+    for name, ng in var.node_groups :
+    name => merge(ng, { subnet_ids = module.eks_network.app_subnet_ids })
+  }
 }
 
 data "tls_certificate" "eks_oidc" {

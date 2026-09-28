@@ -26,13 +26,25 @@ variable "availability_zones" {
 variable "private_subnet_cidrs" {
   description = "CIDR blocks for private subnets"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  default     = ["10.0.16.0/20", "10.0.32.0/20", "10.0.48.0/20"]
 }
 
 variable "public_subnet_cidrs" {
   description = "CIDR blocks for public subnets"
   type        = list(string)
   default     = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
+}
+
+variable "data_subnet_cidrs" {
+  description = "CIDR blocks for the private-data tier (RDS), one per AZ"
+  type        = list(string)
+  default     = ["10.0.64.0/24", "10.0.65.0/24", "10.0.66.0/24"]
+}
+
+variable "nat_per_az" {
+  description = "One NAT gateway per AZ (prod) instead of a single shared NAT (non-prod)"
+  type        = bool
+  default     = false
 }
 
 variable "cluster_name" {
@@ -44,7 +56,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.33"
+  default     = "1.34"
 }
 
 variable "eks_public_endpoint_enabled" {
@@ -147,6 +159,12 @@ variable "node_groups" {
   type = map(object({
     instance_types = list(string)
     capacity_type  = string
+    labels         = optional(map(string), {})
+    taints = optional(list(object({
+      key    = string
+      value  = string
+      effect = string
+    })), [])
     scaling_config = object({
       desired_size = number
       max_size     = number
@@ -154,14 +172,25 @@ variable "node_groups" {
     })
   }))
   default = {
-    "demo-node-group" = {
+    system = {
       instance_types = ["t3.small"]
-      capacity_type  = "SPOT"
-      scaling_config = {
-        desired_size = 1
-        max_size     = 1
-        min_size     = 1
-      }
+      capacity_type  = "ON_DEMAND"
+      labels         = { role = "system" }
+      taints         = [{ key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }]
+      scaling_config = { desired_size = 1, max_size = 2, min_size = 1 }
+    }
+    frontend = {
+      instance_types = ["t3.small"]
+      capacity_type  = "ON_DEMAND"
+      labels         = { role = "frontend" }
+      scaling_config = { desired_size = 1, max_size = 2, min_size = 1 }
+    }
+    backend = {
+      instance_types = ["t3.small"]
+      capacity_type  = "ON_DEMAND"
+      labels         = { role = "backend" }
+      taints         = [{ key = "workload", value = "backend", effect = "NO_SCHEDULE" }]
+      scaling_config = { desired_size = 1, max_size = 3, min_size = 1 }
     }
   }
 }

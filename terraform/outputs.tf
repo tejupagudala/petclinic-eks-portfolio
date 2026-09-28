@@ -11,7 +11,7 @@ output "cluster_name" {
 
 output "vpc_id" {
   description = "VPC ID"
-  value       = module.vpc.vpc_id
+  value       = module.eks_network.vpc_id
 }
 
 output "cost_alert_sns_topic_arn" {
@@ -61,7 +61,9 @@ output "rds_identifier" {
 output "rds_master_user_secret_arn" {
   value = aws_db_instance.petclinic.master_user_secret[0].secret_arn
 }
-
+output "github_actions_plan_role_arn" {
+  value = aws_iam_role.github_actions_plan.arn
+}
 # output "cur_bucket_name" {
 #   value = aws_s3_bucket.cur.bucket
 # }

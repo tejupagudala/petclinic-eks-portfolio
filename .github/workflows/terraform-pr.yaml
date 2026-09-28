@@ -1,0 +1,97 @@
+name: terraform-pr
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-pr.yaml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tf-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+      # checkout, setup-terraform (wrapper false), fmt -check, init -backend=false, validate, tflint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Validate
+        run: |
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform validate
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Lint
+        run: tflint --chdir=terraform --recursive
+
+
+
+
+
+
+  plan:
+    needs: static
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_github_org: ${{ vars.REPO_ORG }}
+      TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+      TF_VAR_github_oidc_provider_arn: ${{ vars.AWS_GHA_OIDC_PROVIDER_ARN }}
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      TF_VAR_enable_cost_anomaly_detection: "false"
+      TF_VAR_existing_anomaly_monitor_arn: ""
+      TF_VAR_eks_public_access_cidrs: '["${{ secrets.EKS_PUBLIC_ACCESS_CIDR }}"]'
+      TF_VAR_rds_username: ${{ secrets.RDS_USERNAME }}
+      # TF_VAR_* — copy the block from infra-bootstrap.yaml lines 19-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC, read-only plan role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PLAN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+        
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform -chdir=terraform init -input=false
+
+      - name: Plan
+        run: |
+          terraform -chdir=terraform plan -input=false -lock=false -no-color -out=tfplan
+          terraform -chdir=terraform show -no-color tfplan > plan.txt
+
+      - name: Comment plan on PR
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: terraform-plan
+          path: plan.txt
+
+
+

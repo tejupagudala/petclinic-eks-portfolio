@@ -166,6 +166,7 @@ jobs:
     
 
       - name: Debug api-gateway rollout state
+        continue-on-error: true
         run: |
           set -euo pipefail
 
