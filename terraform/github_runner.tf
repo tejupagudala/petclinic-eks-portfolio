@@ -1,5 +1,5 @@
 locals {
-  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.vpc.public_subnet_ids[0]
+  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.eks_network.public_subnet_ids[0]
 }
 
 data "aws_ami" "github_runner" {
@@ -32,7 +32,7 @@ resource "aws_security_group" "github_runner" {
   count       = var.enable_github_runner ? 1 : 0
   name        = "${var.cluster_name}-github-runner-sg"
   description = "Security group for GitHub self-hosted runner"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = module.eks_network.vpc_id
 
   dynamic "ingress" {
     for_each = var.github_runner_allowed_ssh_cidrs
