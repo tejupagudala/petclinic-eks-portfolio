@@ -32,15 +32,15 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_observability_agent" {
 }
 
 resource "aws_eks_addon" "eks_pod_identity_agent" {
-  cluster_name      = module.eks.cluster_name
-  addon_name        = "eks-pod-identity-agent"
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "eks-pod-identity-agent"
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 }
 
 resource "aws_eks_addon" "cloudwatch_observability" {
-  cluster_name      = module.eks.cluster_name
-  addon_name        = "amazon-cloudwatch-observability"
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "amazon-cloudwatch-observability"
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 

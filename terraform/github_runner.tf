@@ -25,7 +25,7 @@ resource "aws_ssm_parameter" "github_runner_pat" {
   type      = "SecureString"
   value     = var.github_runner_pat
   overwrite = true
-  tags       = var.default_tags
+  tags      = var.default_tags
 }
 
 resource "aws_security_group" "github_runner" {
@@ -118,11 +118,11 @@ resource "aws_instance" "github_runner" {
   key_name                    = var.github_runner_key_name != "" ? var.github_runner_key_name : null
   associate_public_ip_address = true
   user_data = templatefile("${path.module}/github_runner_userdata.sh.tmpl", {
-    region                          = var.region
-    github_org                      = var.github_org
-    github_repo                     = var.github_repo
+    region                           = var.region
+    github_org                       = var.github_org
+    github_repo                      = var.github_repo
     github_runner_pat_parameter_name = var.github_runner_pat_parameter_name
-    cluster_name                    = var.cluster_name
+    cluster_name                     = var.cluster_name
   })
 
   root_block_device {
