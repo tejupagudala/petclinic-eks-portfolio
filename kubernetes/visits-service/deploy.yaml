@@ -17,6 +17,16 @@ spec:
         app.kubernetes.io/name: visits-service
         app.kubernetes.io/part-of: petclinic
     spec:
+
+      nodeSelector:
+        role: backend
+
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "backend"
+          effect: "NoSchedule"
+
       volumes:
         - name: app-config
           configMap:

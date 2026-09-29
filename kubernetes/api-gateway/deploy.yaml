@@ -49,6 +49,8 @@ spec:
         app.kubernetes.io/name: api-gateway
         app.kubernetes.io/part-of: petclinic
     spec:
+      nodeSelector:
+        role: frontend
       securityContext:
         fsGroup: 1000
         seccompProfile:
