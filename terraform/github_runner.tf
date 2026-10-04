@@ -1,5 +1,5 @@
 locals {
-  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.vpc.public_subnet_ids[0]
+  github_runner_subnet_id_effective = var.github_runner_subnet_id != "" ? var.github_runner_subnet_id : module.eks_network.public_subnet_ids[0]
 }
 
 data "aws_ami" "github_runner" {
@@ -25,14 +25,14 @@ resource "aws_ssm_parameter" "github_runner_pat" {
   type      = "SecureString"
   value     = var.github_runner_pat
   overwrite = true
-  tags       = var.default_tags
+  tags      = var.default_tags
 }
 
 resource "aws_security_group" "github_runner" {
   count       = var.enable_github_runner ? 1 : 0
   name        = "${var.cluster_name}-github-runner-sg"
   description = "Security group for GitHub self-hosted runner"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = module.eks_network.vpc_id
 
   dynamic "ingress" {
     for_each = var.github_runner_allowed_ssh_cidrs
@@ -118,11 +118,11 @@ resource "aws_instance" "github_runner" {
   key_name                    = var.github_runner_key_name != "" ? var.github_runner_key_name : null
   associate_public_ip_address = true
   user_data = templatefile("${path.module}/github_runner_userdata.sh.tmpl", {
-    region                          = var.region
-    github_org                      = var.github_org
-    github_repo                     = var.github_repo
+    region                           = var.region
+    github_org                       = var.github_org
+    github_repo                      = var.github_repo
     github_runner_pat_parameter_name = var.github_runner_pat_parameter_name
-    cluster_name                    = var.cluster_name
+    cluster_name                     = var.cluster_name
   })
 
   root_block_device {

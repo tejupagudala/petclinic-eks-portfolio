@@ -17,10 +17,20 @@ spec:
         app.kubernetes.io/name: customers-service
         app.kubernetes.io/part-of: petclinic
     spec:
+      nodeSelector:
+        role: backend
+
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "backend"
+          effect: "NoSchedule"
+
       volumes:
         - name: app-config
           configMap:
             name: customers-service-config
+
       initContainers:
         - name: wait-for-rds
           image: busybox:1.36
@@ -40,7 +50,7 @@ spec:
               done
 
 
-             
+
       containers:
         - name: customers-service
           image: tejupagudala/customers-service:v3
@@ -108,5 +118,5 @@ spec:
               memory: "256Mi"
             limits:
               memory: "512Mi"
- 
-      
+
+

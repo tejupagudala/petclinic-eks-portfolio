@@ -18,7 +18,10 @@ package org.springframework.samples.petclinic.config;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+	"spring.profiles.active=native",
+	"spring.cloud.config.server.native.search-locations=classpath:/"
+})
 class PetclinicConfigServerApplicationTests {
 
 	@Test
