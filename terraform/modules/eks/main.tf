@@ -102,6 +102,10 @@ resource "aws_eks_cluster" "main" {
   role_arn = aws_iam_role.eks_cluster_role.arn
   version  = var.cluster_version
 
+  upgrade_policy {
+    support_type = "STANDARD"
+  }
+
   tags = var.tags
 
   access_config {
@@ -110,7 +114,7 @@ resource "aws_eks_cluster" "main" {
   }
 
   vpc_config {
-    subnet_ids              = var.subnet_ids
+    subnet_ids              = var.cluster_subnet_ids
     endpoint_private_access = true
     endpoint_public_access  = var.public_endpoint_enabled
     public_access_cidrs     = var.public_access_cidrs
@@ -176,7 +180,7 @@ resource "aws_eks_node_group" "node_groups" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.cluster_name}-node-group-${each.key}"
   node_role_arn   = aws_iam_role.eks_node_group_role.arn
-  subnet_ids      = var.subnet_ids
+  subnet_ids      = each.value.subnet_ids
 
   scaling_config {
     desired_size = each.value.scaling_config.desired_size
@@ -186,6 +190,17 @@ resource "aws_eks_node_group" "node_groups" {
 
   instance_types = each.value.instance_types
   capacity_type  = each.value.capacity_type
+  labels         = each.value.labels
+
+  dynamic "taint" {
+    for_each = each.value.taints
+
+    content {
+      key    = taint.value.key
+      value  = taint.value.value
+      effect = taint.value.effect
+    }
+  }
 
   tags = var.tags
 
