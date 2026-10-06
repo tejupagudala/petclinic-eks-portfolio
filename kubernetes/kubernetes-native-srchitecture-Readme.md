@@ -335,11 +335,6 @@ kubectl create namespace petclinic
 ```
 
 ---
-
-## 2 Deploy MySQL
-
-```bash
-kubectl apply -f kubernetes/mysql/
 ```
 
 ---

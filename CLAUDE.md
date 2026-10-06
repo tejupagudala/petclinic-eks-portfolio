@@ -58,7 +58,7 @@ Each service has `deploy.yaml`, `service.yaml`, `configmap.yaml` in its own subd
 
 Modules in `terraform/modules/`:
 - **vpc**: 10.0.0.0/16 CIDR, 3 AZs (us-east-1), single NAT gateway
-- **eks**: Kubernetes 1.33, spot t3.small nodes, OIDC/IRSA, private API endpoint
+- **eks**: Kubernetes 1.34, spot t3.small nodes, OIDC/IRSA, private API endpoint
 
 Root-level resources:
 - `rds.tf`: MySQL 8.0 on db.t4g.micro

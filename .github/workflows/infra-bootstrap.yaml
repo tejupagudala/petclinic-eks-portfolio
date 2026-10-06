@@ -252,6 +252,11 @@ jobs:
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="$AWS_REGION" \
             --set vpcId="$VPC_ID" \
+            --set nodeSelector.role=system \
+            --set 'tolerations[0].key=CriticalAddonsOnly' \
+            --set 'tolerations[0].operator=Equal' \
+            --set-string 'tolerations[0].value=true' \
+            --set 'tolerations[0].effect=NoSchedule' \
             --wait \
             --timeout 5m \
             --debug \
@@ -326,6 +331,7 @@ jobs:
           ARGO_ROLLOUTS_VERSION=v1.8.3
           kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -n argo-rollouts -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml"
+          kubectl -n argo-rollouts patch deployment argo-rollouts --type=strategic -p '{"spec":{"template":{"spec":{"nodeSelector":{"role":"system"},"tolerations":[{"key":"CriticalAddonsOnly","operator":"Equal","value":"true","effect":"NoSchedule"}]}}}}'
           kubectl -n argo-rollouts rollout status deployment/argo-rollouts --timeout=600s
 
 
@@ -365,6 +371,11 @@ jobs:
                 --set serviceAccount.name=aws-load-balancer-controller \
                 --set region="$AWS_REGION" \
                 --set vpcId="$VPC_ID" \
+                --set nodeSelector.role=system \
+                --set 'tolerations[0].key=CriticalAddonsOnly' \
+                --set 'tolerations[0].operator=Equal' \
+                --set-string 'tolerations[0].value=true' \
+                --set 'tolerations[0].effect=NoSchedule' \
                 --wait \
                 --timeout 5m
             fi
@@ -438,6 +449,11 @@ jobs:
               --set serviceAccount.name=aws-load-balancer-controller \
               --set region="$AWS_REGION" \
               --set vpcId="$VPC_ID" \
+              --set nodeSelector.role=system \
+              --set 'tolerations[0].key=CriticalAddonsOnly' \
+              --set 'tolerations[0].operator=Equal' \
+              --set-string 'tolerations[0].value=true' \
+              --set 'tolerations[0].effect=NoSchedule' \
               --wait \
               --timeout 5m
             kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=600s

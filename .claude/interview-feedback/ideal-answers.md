@@ -663,3 +663,211 @@ The cold-run / one-click-bootstrap failures are a "what broke" story, NOT the op
 - Monitoring = watching KNOWN problems (pre-defined metrics/alerts) → "is it broken?"
 - Observability = investigating UNKNOWN problems (metrics + logs + traces) → "why is it broken?"
 - 3 pillars: metrics, logs, traces. My project has metrics + logs; **tracing is the honest gap.**
+
+## Mentor Task Drill — Networking LLD (diagram Task 1) — 2026-09-09
+
+### Q1 — What makes public-a public vs private-app-a private? (scored 5/10)
+**Ideal answer:**
+- The ONLY difference is the route table. `public-a` → `rt-public` has `0.0.0.0/0 → igw`.
+  `private-app-a` → `rt-private-a` has `0.0.0.0/0 → nat-a`. There is no "public" flag on a subnet.
+- IGW = 1:1 translation public↔private IP in BOTH directions → internet can initiate inbound.
+- NAT = translates outbound-initiated only, keeps a state table for replies → nothing can initiate inbound.
+- Swap the route tables: ALB loses its path in (users can't reach front-end); nodes get an IGW route but
+  have no public IP so they can't reach out either → image pulls, STS, everything breaks.
+- `map_public_ip_on_launch = false` is NOT what makes a subnet public. Route = path, public IP = address.
+  Need both to be internet-reachable. false on all subnets so nothing gets an address by accident;
+  ALB and NAT get theirs explicitly.
+**Mistake to kill:** describing the effect ("to and fro" vs "out only") without naming the route table.
+
+### Q2 — Trace pod → internet (answered for Sai)
+- Two route-table lookups, one NAT state table.
+- Lookup 1 `rt-private-a`: not local → `0.0.0.0/0 → nat-a`.
+- NAT-a rewrites source to its EIP, writes state-table entry.
+- Lookup 2 `rt-public`: not local → `0.0.0.0/0 → igw`. Out.
+- Reply to NAT's EIP → state table match → rewrite dest back to pod → local route.
+- Reply allowed because it MATCHES a state entry; unsolicited inbound has no entry → dropped.
+**One-liner:** "Two route tables — private sends it to the NAT, public sends the NAT to the IGW.
+The NAT state table lets replies back while blocking anything unsolicited."
+
+### Q3 — One IGW but three NATs? (scored 7/10)
+**Ideal answer:**
+- IGW is VPC-level (regional), AWS runs it redundant — never AZ-bound.
+- NAT Gateway lives in ONE subnet = ONE AZ. AZ dies → that NAT dies.
+- Per-AZ NAT + per-AZ private route table: AZ-a failure takes out only AZ-a's egress (whose nodes are
+  down anyway); b and c keep using nat-b / nat-c.
+- It is NOT "fail over to another AZ's NAT" — rt-private-a points at nat-a only.
+- Single-NAT failure mode: NAT-a dies → healthy nodes in b and c lose internet. That's what we design away.
+- Data tier never uses NAT — rt-data has no default route.
+**Mistakes to kill:** "region" (say VPC-level, not AZ-level); "backend uses NAT in other AZs".
+
+### Q4 — Why /20 for private-app but /24 for public and data? (scored 8/10)
+**Ideal answer:**
+- /20 = 4,096 (4,091 usable after AWS's 5 reserved); /24 = 256 (251 usable).
+- **AWS VPC CNI** (name it — EKS-specific, not a Kubernetes rule) gives every pod a real VPC IP,
+  plus a warm pool per node → subnet usage = nodes × (pods + warm IPs). App subnet = pod budget.
+- HPA/autoscaling means pod count is unbounded → size for growth.
+- Public: ALB ~8 IPs per subnet at scale + 1 per NAT. Data: 1–2 ENIs per RDS. /24 is already 10× enough.
+**Say it:** "The VPC CNI gives every pod a real VPC IP and keeps a warm pool per node, so the app subnet
+is my pod budget — /20 gives 4,091 usable. ALB, NAT and RDS need a dozen IPs between them."
+
+### Follow-ups Sai raised (good ones)
+- **"RDS needs internet for patching?"** No — managed service; AWS patches/backs up via its own control
+  plane, never through my route tables. Self-managed DB on EC2 would use S3 gateway endpoint (yum repos)
+  + SSM interface endpoint — still never 0.0.0.0/0. "No default route ≠ no routes."
+- **"If AZ a dies its nodes can't reach any NAT, so how does multi-NAT help?"** It doesn't save AZ a —
+  nothing does. It saves b and c from depending on AZ a. Single NAT: AZ-a failure = healthy nodes in b/c
+  lose all egress. Per-AZ NAT + per-AZ RT: b and c keep going, K8s reschedules a's pods onto them.
+  Principle: never let a healthy AZ depend on a resource in another AZ.
+
+### Q5 — Why sg-rds allows 3306 FROM sg-node instead of from CIDR 10.0.16.0/20? (scored 4/10)
+**Ideal answer — CIDR = location, SG = identity:**
+- CIDR rule = "anyone on this street" — allows anything with an IP in that range (bastion, rogue pod,
+  another team's service).
+- SG reference = "only people wearing this badge" — allows only ENIs that are members of sg-node.
+- Wins: (1) nodes change IPs daily (spot) — badge follows the ENI, rule never edited;
+  (2) one rule covers all AZs/subnets; (3) survives re-architecture (new AZ, new nodegroup).
+- HOW the badge is set: EKS attaches the cluster security group to every node ENI automatically
+  (`module.eks.cluster_security_group_id`). The door checks it via `source_security_group_id`.
+- **Gap in my repo:** rds.tf uses `cidr_blocks = [var.vpc_cidr]` — whole VPC incl. public subnets.
+  Fix = one line: `source_security_group_id = module.eks.cluster_security_group_id`. Own it out loud.
+**Mistake to kill:** calling an SG rule a "network policy" (that's a Kubernetes object).
+**Say it:** "A CIDR lets in anything with an IP in that range. An SG reference lets in only the nodes
+themselves, wherever they are and whatever their IP is today. Identity, not location."
+
+### Q6 — Front-end is public, so why are the pods in the private subnet? (scored 7/10)
+**Ideal answer:**
+- The ALB is the ONLY thing that needs to be internet-reachable. It holds the public IP/DNS, terminates
+  TLS (ACM), routes by host/path, health-checks, and FORWARDS (not redirects) straight to pod IPs
+  (target-type: ip) in the private subnet.
+- Nodes in a public subnet would need public IPs to get out (IGW can't translate private IPs) → every
+  node is one SG mistake away from the internet → attack surface goes from 1 ALB to N nodes.
+- And there's nothing to gain: users already reach the front-end fully through the ALB.
+**Mistakes to kill:** "redirect" (say forward/proxy); "anyone can hack the nodes" (say: needs public IPs,
+multiplies attack surface, no benefit).
+**Say it:** "The ALB is the only thing that needs to be reachable from the internet. Pods in a public
+subnet would need public IPs, multiply the attack surface, and gain nothing."
+
+### Q7 — Stateful vs stateless; the extra NACL rule (scored 7/10)
+**Ideal answer:**
+- SG = stateful: remembers the connection, replies allowed automatically. Allow-only, ENI-level.
+- NACL = stateless: evaluates every packet alone. Subnet-level. Can allow AND deny.
+- The extra rule = **ephemeral ports 1024–65535**, both directions. Replies go back to a random high
+  port the client picked; without the rule, requests get in and responses never leave.
+- Rule numbers: lowest first, FIRST MATCH WINS, stop. `*` at end = deny. Order changes the outcome
+  (deny 22 @90 + allow all @100 blocks SSH; swapped, it doesn't).
+**Mistake to kill:** "rule 100 negates rule 200" → say "200 is never evaluated if 100 matched".
+**Say it:** "A security group remembers the connection, so replies are automatic. A NACL doesn't, so it
+needs an explicit allow for ephemeral ports 1024–65535 or nothing comes back."
+
+### Q8 — Why must Networking apply the kubernetes.io/role/elb tags? (scored 4/10)
+**Ideal answer:**
+- Tags are NOT for RAM. They're read by the **AWS Load Balancer Controller** to decide which subnets
+  to place an ALB in: `role/elb=1` → internet-facing (public), `role/internal-elb=1` → internal (private-app).
+- No tags → controller finds no subnets → Ingress never gets an ALB (very common EKS failure).
+- RAM = consumer can USE shared subnets (launch ENIs/nodes) but does NOT OWN them. You can only tag
+  what you own → EKS account's tag call fails → Networking must apply them on EKS's behalf.
+- It's a cross-team handoff: EKS says which tags it needs, Networking writes them.
+**Mistake to kill:** "tags tell RAM where to share" — no; tags are for the LB controller.
+
+### Diagram 1 summary — 2026-09-09
+Scores: Q1 5, Q3 7, Q4 8, Q5 4, Q6 7, Q7 7, Q8 4.
+Pattern: strong on WHAT things do, weak on WHY this over the alternative. Re-read "Say it" lines for
+Q1, Q5, Q8 and the NAT follow-up before the mentor class.
+
+## Mentor Task Drill — EKS LLD (diagram Task 2) — 2026-09-09
+
+### Q1 — Why not put ng-system on spot too? (scored 6/10)
+**Ideal answer:**
+- Not about "data/state" — all nodes are stateless. It's about what breaks ELSEWHERE.
+- ng-system runs cluster-wide dependencies: CoreDNS (lose it → every pod fails DNS, frontend can't
+  resolve backend), ALB controller (targets go stale), autoscaler (can't recover from the reclaim),
+  Prometheus (canary analysis blind).
+- Reclaim on ng-system degrades every tier even though their own nodes are fine → worth on-demand.
+- Backend is safe on spot because: stateless + replicated (3+) + PodDisruptionBudget + 3 instance
+  types × 3 AZs + 2-min interruption notice → rolling event, not outage.
+**Mistake to kill:** "data and state is lost"; "we know the workload" as the reason.
+
+### Q2 — Why taint ng-system when it already has a label? (taught, not scored)
+**Concepts:**
+- Label + nodeSelector = pod CHOOSES node ("sign on the door"). Doesn't stop anyone.
+- Taint + toleration = node REFUSES pods without the key ("lock on the door").
+- Need both: label pulls system pods in; taint keeps app pods out when they scale.
+**When to taint — if a pod landing by accident would cause harm:**
+- ng-system: harms the NEIGHBOURS (CoreDNS starved → cluster-wide DNS slowdown).
+- ng-backend: harms the POD (spot reclaim kills something not built for interruption). Toleration = waiver.
+- ng-frontend: no harm either way → no taint. Deliberately the open default so nothing is Pending forever.
+**Where it lives:** node side = `labels {}` + `taint {}` in aws_eks_node_group (Terraform);
+pod side = `nodeSelector` + `tolerations` under spec.template.spec in each Deployment.
+Honest line: "My cluster has one nodegroup today, so no placement logic yet; the design adds it."
+**Say it:** "A label lets a pod choose the node; a taint lets the node refuse pods. Taint when an
+accidental landing would harm what's there (system) or harm the pod (spot). Leave one pool open."
+
+### Side concepts covered
+- Spot interruption notice = always exactly 2 minutes; managed nodegroups cordon+drain automatically.
+- RDS has no spot — managed service; cost levers are on-demand / reserved / stop.
+- EC2 purchasing options: On-Demand, Spot, Reserved/Savings Plans, Dedicated Hosts.
+- ELB = Elastic Load Balancing family (ALB, NLB). internet-facing → public subnets (role/elb);
+  internal → private (role/internal-elb). Internal LB for VPN users, other VPCs, Lambdas, other clusters.
+- ENIs: everything that talks on the network has one and takes 1 IP. ALB 1–8/subnet, NAT 1, RDS 1/instance.
+
+### Q3 — Same subnet, same SG: what actually stops the internet reaching a back-end pod? (scored 3/10)
+**Ideal answer — three Kubernetes things:**
+1. **No Ingress object** → ALB controller never creates a load balancer → no public address exists.
+2. **Service type ClusterIP** → virtual IP that only exists inside the cluster; not in any AWS route table.
+3. **NetworkPolicy** (enforced by VPC CNI) → only pods in namespace `frontend` may reach back-end pods.
+- AWS layer (private subnet, no public IP, sg-node from sg-alb only) applies EQUALLY to both tiers —
+  it's what makes pods unreachable directly; the three K8s controls stop the back-end being reachable
+  via the ALB the way the front-end is.
+**Mistakes to kill:**
+- Route tables can't separate pods in the same subnet — they route by destination IP per subnet.
+- NetworkPolicy ≠ RBAC. RBAC = who can call the K8s API (kubectl). NetworkPolicy = pod-to-pod traffic.
+- Ingress is a Kubernetes object, not AWS — and the back-end has NONE.
+**Say it:** "At the AWS layer both tiers are identical. The back-end is private because of three
+Kubernetes things: no Ingress, ClusterIP service, and a NetworkPolicy allowing only the frontend namespace."
+
+### Q4 — Private API endpoint: what's the risk, how do you reach it? (scored 3/10)
+**Ideal answer:**
+- The endpoint = Kubernetes CONTROL PLANE (what kubectl talks to). Reach it + authenticate = own the
+  cluster (create pods, read Secrets, exec). Public endpoint = anyone on the internet can try.
+  Risk = exposing the control surface, NOT application data.
+- How in: CI = **self-hosted GitHub runner on EC2 inside the VPC** (github_runner.tf) → reaches
+  private endpoint natively. Humans = VPN/bastion, or SSM Session Manager port-forward.
+  Non-prod convenience = public endpoint + CIDR allowlist (`eks_public_access_cidrs`), never prod.
+- Repo today: `eks_public_endpoint_enabled = false`, allowlist empty → only the runner can reach it.
+**Mistakes to kill:**
+- "assign my IP to RBAC" — IP allowlist is a NETWORK control on the endpoint; RBAC is IDENTITY authz.
+- "app data is in pods" — the API endpoint is about control, not data.
+**Say it:** "The API endpoint is the control plane — whoever reaches it and authenticates owns the
+cluster. My CI runs on a self-hosted runner inside the VPC; humans use VPN or SSM port-forward."
+
+### Q5 — target-type: ip vs the alternative (scored 3/10)
+**Ideal answer:**
+- Alternative = `target-type: instance`: ALB targets NODES on a NodePort (30000–32767) → kube-proxy →
+  pod (maybe on another node/AZ). Two hops, node-level health checks.
+- `ip`: ALB targets POD IPs directly (possible because VPC CNI gives pods real VPC IPs). One hop,
+  per-pod health checks, no cross-AZ forwarding, works with Fargate.
+- Project-specific: Argo Rollouts canary weighting needs the ALB to see individual pods → `ip` mode.
+- Cost: sg-node must allow sg-alb on the POD port (8080), not a NodePort.
+**Mistake to kill:** confusing target-type with path-based routing (that's a LISTENER RULE).
+**Say it:** "instance mode targets nodes on a NodePort via kube-proxy — two hops. ip mode targets pod
+IPs directly: one hop, per-pod health checks, and the ALB can weight individual pods for canary."
+
+### Side concept — bastion
+- Hardened EC2 in public subnet, the ONE door for humans into private resources (SSH → then kubectl/mysql).
+- Modern replacement: SSM Session Manager — no public IP, no port 22, IAM-authenticated, sessions logged.
+
+### Q6 — Why 3 instance types on ng-backend? (scored 6/10)
+**Ideal answer:**
+- Spot **capacity pool** = one instance type × one AZ. Reclaims/shortages hit a whole pool at once.
+- Single type → an AZ shortage takes EVERY back-end node in that AZ in the same 2 minutes; PDB can't
+  help because there's no other pool to reschedule into.
+- 3 types × 3 AZs = 9 POOLS (not 9 instances). Shortage in one = single-node event; autoscaler refills
+  from the other 8.
+- Types must be same shape (m6i/m5/m6a.xlarge = 4 vCPU/16 GB) so pods schedule identically.
+- `capacity-optimized` allocation → launches into the pool with the most spare capacity → fewer reclaims.
+**Mistake to kill:** "9 instances" → say "9 capacity pools".
+
+### Diagram 2 summary — 2026-09-09
+Scores: Q1 6, Q2 taught, Q3 3, Q4 3, Q5 3, Q6 6.
+Pattern: Kubernetes-layer concepts confused with AWS ones (NetworkPolicy≠RBAC, IP allowlist≠RBAC,
+target-type≠path routing). Habit to build: NAME THE LAYER (AWS or Kubernetes) for every control.
