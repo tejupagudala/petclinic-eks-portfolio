@@ -1,0 +1,33 @@
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+
+metadata:
+  name: petclinic-kibana
+  namespace: elastic
+
+spec:
+  version: 9.5.5
+  count: 1
+
+  elasticsearchRef:
+    name: petclinic-logs
+
+  podTemplate:
+    spec:
+      nodeSelector:
+        role: observability
+
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: observability
+          effect: NoSchedule
+
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"

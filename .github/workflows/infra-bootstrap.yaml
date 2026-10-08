@@ -2,6 +2,12 @@ name: infra-bootstrap
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_eck:
+        description: "Deploy ECK logging POC"
+        type: boolean
+        default: true
+        required: false
 
 concurrency:
   group: terraform-${{ github.repository }}
@@ -394,7 +400,157 @@ jobs:
           kubectl get crd servicemonitors.monitoring.coreos.com
           kubectl -n monitoring get pods
           kubectl -n monitoring get svc
+        
+      - name: Install ECK operator
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
 
+          helm repo add elastic https://helm.elastic.co --force-update
+          helm repo update
+
+          helm upgrade --install elastic-operator elastic/eck-operator \
+            --namespace elastic-system \
+            --create-namespace \
+            --version 3.5.0 \
+            --set nodeSelector.role=system \
+            --set 'tolerations[0].key=CriticalAddonsOnly' \
+            --set 'tolerations[0].operator=Equal' \
+            --set-string 'tolerations[0].value=true' \
+            --set 'tolerations[0].effect=NoSchedule' \
+            --wait \
+            --timeout 10m
+
+          kubectl -n elastic-system rollout status \
+            statefulset/elastic-operator \
+            --timeout=600s
+
+          kubectl wait --for=condition=Established \
+            crd/elasticsearches.elasticsearch.k8s.elastic.co \
+            --timeout=120s
+
+          kubectl wait --for=condition=Established \
+            crd/kibanas.kibana.k8s.elastic.co \
+            --timeout=120s
+
+          kubectl wait --for=condition=Established \
+            crd/agents.agent.k8s.elastic.co \
+            --timeout=120s
+
+
+      - name: Deploy Elasticsearch
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          kubectl apply -f kubernetes/elastic/namespace.yaml
+          kubectl apply -f kubernetes/elastic/elasticsearch.yaml
+
+          for i in {1..90}; do
+            PHASE=$(kubectl -n elastic get elasticsearch petclinic-logs \
+              -o jsonpath='{.status.phase}' 2>/dev/null || true)
+
+            HEALTH=$(kubectl -n elastic get elasticsearch petclinic-logs \
+              -o jsonpath='{.status.health}' 2>/dev/null || true)
+
+            echo "Elasticsearch phase=${PHASE} health=${HEALTH}"
+
+            if [ "$PHASE" = "Ready" ] && [ "$HEALTH" = "green" ]; then
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Elasticsearch did not become ready."
+          exit 1
+     
+      - name: Deploy Kibana
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          kubectl apply -f kubernetes/elastic/kibana.yaml
+
+          for i in {1..90}; do
+            HEALTH=$(kubectl -n elastic get kibana petclinic-kibana \
+              -o jsonpath='{.status.health}' 2>/dev/null || true)
+
+            echo "Kibana health=${HEALTH}"
+
+            if [ "$HEALTH" = "green" ]; then
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Kibana did not become healthy."
+          exit 1
+
+
+      - name: Deploy Elastic Agent
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          kubectl apply -f kubernetes/elastic/elastic-agent.yaml
+
+          for i in {1..60}; do
+            HEALTH=$(kubectl -n elastic get agent petclinic-agent \
+              -o jsonpath='{.status.health}' 2>/dev/null || true)
+
+            AVAILABLE=$(kubectl -n elastic get agent petclinic-agent \
+              -o jsonpath='{.status.availableNodes}' 2>/dev/null || true)
+
+            EXPECTED=$(kubectl -n elastic get agent petclinic-agent \
+              -o jsonpath='{.status.expectedNodes}' 2>/dev/null || true)
+
+            echo "Agent health=${HEALTH} available=${AVAILABLE} expected=${EXPECTED}"
+
+            if [ "$HEALTH" = "green" ]; then
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Elastic Agent did not become healthy."
+          exit 1
+
+      - name: Verify ECK logging stack
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          echo "=== ECK Operator ==="
+          kubectl get pods -n elastic-system -o wide
+
+          echo "=== Elastic Resources ==="
+          kubectl get elasticsearch,kibana,agent -n elastic
+
+          echo "=== Elastic Pods ==="
+          kubectl get pods -n elastic -o wide 
+
+
+      - name: Dump ECK diagnostics on failure
+        if: ${{ failure() && inputs.deploy_eck }}
+        run: |
+          echo "=== Elastic resources ==="
+          kubectl get elasticsearch,kibana,agent -n elastic || true
+
+          echo "=== Elastic pods ==="
+          kubectl get pods -n elastic -o wide || true
+
+          echo "=== Elastic events ==="
+          kubectl get events -n elastic \
+            --sort-by=.lastTimestamp | tail -n 100 || true
+
+          echo "=== ECK operator ==="
+          kubectl get pods -n elastic-system -o wide || true
+          kubectl logs -n elastic-system elastic-operator-0 \
+            --tail=200 || true
+            
       - name: Verify AWS Load Balancer Controller IRSA
         run: |
           set -euo pipefail

@@ -1,0 +1,101 @@
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+
+metadata:
+  name: petclinic-agent
+  namespace: elastic
+
+spec:
+  version: 9.5.5
+
+  elasticsearchRefs:
+    - name: petclinic-logs
+
+  daemonSet:
+    podTemplate:
+      spec:
+        # Elastic Agent reads /var/log/containers/*.log, which are root-owned
+        # on the host, so this container runs as UID 0. That is unavoidable for
+        # node-level log collection and is what every log agent does.
+        #
+        # The blast radius is constrained instead: all capabilities dropped and
+        # only DAC_READ_SEARCH added back (bypass file-read permission checks),
+        # no privilege escalation, and /var/log mounted read-only. Root with one
+        # capability is a far smaller surface than root with forty.
+        #
+        # This is the one deliberate exception to the non-root, read-only-rootfs
+        # posture used by the Petclinic services.
+        securityContext:
+          runAsUser: 0
+          seccompProfile:
+            type: RuntimeDefault
+
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: role
+                      operator: In
+                      values:
+                        - frontend
+                        - backend
+
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: backend
+            effect: NoSchedule
+
+        containers:
+          - name: agent
+            securityContext:
+              privileged: false
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+                add: ["DAC_READ_SEARCH"]
+
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "300Mi"
+              limits:
+                memory: "600Mi"
+
+            volumeMounts:
+              - name: varlog
+                mountPath: /var/log
+                readOnly: true
+
+        volumes:
+          - name: varlog
+            hostPath:
+              path: /var/log
+
+  config:
+    inputs:
+      - id: kubernetes-container-logs
+        type: filestream
+        use_output: default
+
+        data_stream:
+          namespace: petclinic
+
+        streams:
+          - id: kubernetes-container-logs
+
+            data_stream:
+              type: logs
+              dataset: kubernetes.container_logs
+
+            prospector:
+              scanner:
+                symlinks: true
+
+            parsers:
+              - container:
+                  format: auto
+
+            paths:
+              - /var/log/containers/*.log
