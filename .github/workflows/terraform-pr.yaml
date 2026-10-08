@@ -117,7 +117,3 @@ jobs:
       - name: Fail job when plan failed
         if: always() && (steps.plan.outcome == 'failure' || steps.render.outcome == 'failure')
         run: exit 1
-
-      - name: Fail job when plan failed
-        if: always() && (steps.plan.outcome == 'failure' || steps.render.outcome == 'failure')
-        run: exit 1
