@@ -30,11 +30,31 @@ node_groups = {
     scaling_config = { desired_size = 2, max_size = 3, min_size = 1 }
   }
   backend = {
-    instance_types = ["t3.small"]
-    capacity_type  = "ON_DEMAND"
+    instance_types = ["t3.small", "t3a.small"]
+    capacity_type  = "SPOT"
     labels         = { role = "backend" }
     taints         = [{ key = "workload", value = "backend", effect = "NO_SCHEDULE" }]
     scaling_config = { desired_size = 2, max_size = 3, min_size = 1 }
+  }
+  observability = {
+    instance_types = ["t3.large"]
+    capacity_type  = "ON_DEMAND"
+
+    labels = { role = "observability" }
+
+    taints = [
+      {
+        key    = "workload"
+        value  = "observability"
+        effect = "NO_SCHEDULE"
+      }
+    ]
+
+    scaling_config = {
+      desired_size = 1
+      max_size     = 1
+      min_size     = 1
+    }
   }
 }
 
