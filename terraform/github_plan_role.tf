@@ -83,7 +83,9 @@ data "aws_iam_policy_document" "github_plan_read" {
       "eks:ListAccessEntries",
       "eks:DescribeAccessEntry",
       "eks:ListAssociatedAccessPolicies",
-      "eks:ListTagsForResource"
+      "eks:ListTagsForResource",
+      "eks:DescribePodIdentityAssociation",
+      "eks:ListPodIdentityAssociations"
     ]
 
     resources = ["*"]
@@ -159,7 +161,8 @@ data "aws_iam_policy_document" "github_plan_read" {
 
     actions = [
       "budgets:ViewBudget",
-      "budgets:Describe*"
+      "budgets:Describe*",
+      "budgets:ListTagsForResource"
     ]
 
     resources = ["*"]
