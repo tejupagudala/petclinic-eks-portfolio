@@ -12,7 +12,7 @@ alert_email                 = "teju.654@gmail.com"
 rds_instance_class          = "db.t3.micro"
 rds_allocated_storage       = 20
 rds_username                = "petclinic"
-eks_public_access_cidrs     = ["75.210.79.3/32"]
+eks_public_access_cidrs     = ["97.223.28.232/32"]
 
 
 node_groups = {
