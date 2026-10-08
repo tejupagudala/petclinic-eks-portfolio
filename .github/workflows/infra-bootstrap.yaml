@@ -318,7 +318,7 @@ jobs:
           helm upgrade --install argocd argo/argo-cd \
             -n argocd --create-namespace \
             --set configs.params.server.insecure=true \
-            -f kubernetes/argocd/argocd-values.yaml \
+            -f kubernetes/helm-values/argocd-values.yaml \
             --wait \
             --timeout 10m
 
@@ -386,7 +386,7 @@ jobs:
           helm repo update
           helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
             -n monitoring --create-namespace \
-            -f kubernetes/monitoring/kube-prometheus-stack-values.yaml
+            -f kubernetes/helm-values/kube-prometheus-stack-values.yaml
 
       - name: Verify Prometheus stack
         run: |
