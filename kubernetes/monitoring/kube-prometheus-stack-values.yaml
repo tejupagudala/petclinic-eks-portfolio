@@ -1,0 +1,51 @@
+# Pin the monitoring stack to the observability node group.
+#
+# Why not the system group: system nodes are t3.small with ~1.4 GiB
+# allocatable and 11 pod slots. Prometheus alone wants 1-2 GiB, so pinning
+# there trades Pending for OOM kills. The observability node is
+# m7i-flex.large with ~6.9 GiB allocatable and 29 pod slots.
+#
+# Why pin at all: frontend is the only untainted node group, so every
+# unpinned pod lands there. The monitoring stack filled both frontend
+# nodes to 11/11 and left api-gateway unschedulable.
+#
+# prometheus-node-exporter is deliberately absent. It is a DaemonSet and
+# must run on EVERY node to collect node metrics; its chart default
+# already tolerates all NoSchedule taints. Adding a nodeSelector here
+# would blind node metrics on every other node group.
+
+prometheusOperator:
+  nodeSelector:
+    role: observability
+  tolerations: &observabilityToleration
+    - key: workload
+      operator: Equal
+      value: observability
+      effect: NoSchedule
+  admissionWebhooks:
+    patch:
+      nodeSelector:
+        role: observability
+      tolerations: *observabilityToleration
+
+prometheus:
+  prometheusSpec:
+    nodeSelector:
+      role: observability
+    tolerations: *observabilityToleration
+
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      role: observability
+    tolerations: *observabilityToleration
+
+grafana:
+  nodeSelector:
+    role: observability
+  tolerations: *observabilityToleration
+
+kube-state-metrics:
+  nodeSelector:
+    role: observability
+  tolerations: *observabilityToleration

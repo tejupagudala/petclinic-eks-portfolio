@@ -1,0 +1,24 @@
+# Pin Argo CD to the observability node group.
+#
+# Why: frontend is the only untainted node group, so every unpinned pod
+# lands there. Argo CD's seven components filled both frontend t3.small
+# nodes to their 11-pod ceiling, leaving api-gateway and a node-exporter
+# unschedulable.
+#
+# Why observability rather than system: system nodes are t3.small with
+# ~1.4 GiB allocatable and 11 pod slots. The observability node is
+# m7i-flex.large with ~6.9 GiB and 29 slots, and was only ~15% utilised.
+# This costs nothing extra -- it uses capacity already running.
+#
+# global.* propagates to every Argo CD component (server, repo-server,
+# application-controller, applicationset-controller, notifications,
+# redis, dex), so there is no need to set each one individually.
+
+global:
+  nodeSelector:
+    role: observability
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: observability
+      effect: NoSchedule
