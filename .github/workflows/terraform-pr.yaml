@@ -6,6 +6,7 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-pr.yaml"
+      - ".github/workflows/infra-bootstrap.yaml"
 
 permissions:
   id-token: write
