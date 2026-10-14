@@ -1,6 +1,6 @@
 
 
-FROM eclipse-temurin:21-jdk AS builder
+FROM eclipse-temurin:21-jdk-noble AS builder
 
 WORKDIR /usr/src/app/
 
@@ -29,7 +29,7 @@ RUN ./mvnw -q -DskipTests -f spring-petclinic-api-gateway/pom.xml package
 
 #####################################################
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre-noble
 
 WORKDIR /usr/src/app/
 
