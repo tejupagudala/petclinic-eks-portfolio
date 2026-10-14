@@ -1,0 +1,18 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: petclinic
+  namespace: petclinic
+spec:
+  entryPoints:
+    - websecure
+
+  routes:
+    - match: Host(`petclinic.thedevopsportfolio.online`)
+      kind: Rule
+      services:
+        - name: api-gateway-weighted
+          kind: TraefikService
+
+  tls:
+    secretName: petclinic-tls
