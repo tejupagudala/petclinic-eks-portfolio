@@ -1,0 +1,57 @@
+opentelemetry-operator:
+  admissionWebhooks:
+    certManager:
+      enabled: true
+    autoGenerateCert:
+      enabled: false
+
+collectors:
+  cluster:
+    nodeSelector:
+      role: observability
+
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: observability
+        effect: NoSchedule
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  daemon:
+    tolerations:
+      - operator: Exists
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 250Mi
+      limits:
+        cpu: 300m
+        memory: 500Mi
+
+  gateway:
+    replicas: 1
+
+    nodeSelector:
+      role: observability
+
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: observability
+        effect: NoSchedule
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 384Mi
+      limits:
+        cpu: 750m
+        memory: 1Gi
