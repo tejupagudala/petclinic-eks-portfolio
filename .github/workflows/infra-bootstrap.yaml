@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       deploy_eck:
-        description: "Deploy ECK logging POC"
+        description: "Deploy legacy ECK logging POC"
         type: boolean
-        default: true
+        default: false
         required: false
 
 concurrency:
@@ -551,6 +551,77 @@ jobs:
           kubectl logs -n elastic-system elastic-operator-0 \
             --tail=200 || true
             
+      - name: Install cert-manager
+        run: |
+          set -euo pipefail
+
+          helm repo add jetstack https://charts.jetstack.io --force-update
+          helm repo update
+
+          # The OpenTelemetry operator issues its admission-webhook
+          # certificates through cert-manager (otel-values.yaml sets
+          # certManager.enabled and disables autoGenerateCert), so this must
+          # land before the EDOT install. Traefik's TLS also depends on it.
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --create-namespace \
+            --version v1.21.2 \
+            --set crds.enabled=true \
+            --set nodeSelector.role=system \
+            --set 'tolerations[0].key=CriticalAddonsOnly' \
+            --set 'tolerations[0].operator=Equal' \
+            --set-string 'tolerations[0].value=true' \
+            --set 'tolerations[0].effect=NoSchedule' \
+            --wait \
+            --timeout 8m
+
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=300s
+
+      - name: Install Elastic EDOT observability
+        env:
+          ELASTIC_ENDPOINT: ${{ secrets.ELASTIC_ENDPOINT }}
+          ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Fail loudly rather than creating an empty secret, which would
+          # leave the collectors running and silently shipping nowhere.
+          if [ -z "${ELASTIC_ENDPOINT:-}" ] || [ -z "${ELASTIC_API_KEY:-}" ]; then
+            echo "ELASTIC_ENDPOINT and/or ELASTIC_API_KEY repository secrets are not set."
+            exit 1
+          fi
+
+          echo "Adding OpenTelemetry Helm repository..."
+          helm repo add open-telemetry \
+            https://open-telemetry.github.io/opentelemetry-helm-charts \
+            --force-update
+
+          helm repo update
+
+          echo "Creating OpenTelemetry namespace..."
+          kubectl create namespace opentelemetry-operator-system \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          echo "Creating Elastic authentication secret..."
+          kubectl create secret generic elastic-secret-otel \
+            --namespace opentelemetry-operator-system \
+            --from-literal=elastic_endpoint="$ELASTIC_ENDPOINT" \
+            --from-literal=elastic_api_key="$ELASTIC_API_KEY" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          echo "Installing EDOT..."
+          helm upgrade --install opentelemetry-kube-stack \
+            open-telemetry/opentelemetry-kube-stack \
+            --namespace opentelemetry-operator-system \
+            --values "https://raw.githubusercontent.com/elastic/elastic-agent/refs/tags/v9.5.5/deploy/helm/edot-collector/kube-stack/values.yaml" \
+            --values kubernetes/elastic/otel-values.yaml \
+            --version "0.16.0" \
+            --wait \
+            --timeout 10m
+
+
       - name: Verify AWS Load Balancer Controller IRSA
         run: |
           set -euo pipefail
