@@ -1,0 +1,44 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+
+metadata:
+  name: petclinic-logs
+  namespace: elastic
+
+spec:
+  version: 9.5.5
+
+  nodeSets:
+    - name: default
+      count: 1
+
+      config:
+        node.store.allow_mmap: false
+
+      podTemplate:
+        spec:
+          nodeSelector:
+            role: observability
+
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
+
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "1536Mi"
+                limits:
+                  memory: "2Gi"
+
+          # ECK defaults to a PersistentVolumeClaim named elasticsearch-data.
+          # Overriding it with emptyDir keeps this POC free of a StorageClass
+          # and the EBS CSI driver, neither of which is installed. Log data is
+          # intentionally ephemeral: it dies with the pod.
+          volumes:
+            - name: elasticsearch-data
+              emptyDir: {}

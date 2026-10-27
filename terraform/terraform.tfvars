@@ -34,7 +34,7 @@ node_groups = {
     capacity_type  = "SPOT"
     labels         = { role = "backend" }
     taints         = [{ key = "workload", value = "backend", effect = "NO_SCHEDULE" }]
-    scaling_config = { desired_size = 2, max_size = 3, min_size = 1 }
+    scaling_config = { desired_size = 3, max_size = 3, min_size = 1 }
   }
   observability = {
     instance_types = ["m7i-flex.large"]
