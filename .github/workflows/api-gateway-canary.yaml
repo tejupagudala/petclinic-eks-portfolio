@@ -3,7 +3,7 @@ name: api-gateway-canary
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "kubernetes/api-gateway/**"
       - ".github/workflows/api-gateway-canary.yaml"
@@ -20,8 +20,10 @@ permissions:
 jobs:
   verify-infra-bootstrap:
     runs-on: ubuntu-latest
+
     outputs:
       bootstrap_run_url: ${{ steps.check.outputs.bootstrap_run_url }}
+
     steps:
       - name: Verify latest infra-bootstrap on main succeeded
         id: check
@@ -35,6 +37,7 @@ jobs:
             "/repos/${GITHUB_REPOSITORY}/actions/workflows/infra-bootstrap.yaml/runs?branch=main&status=completed&per_page=1")
 
           COUNT=$(echo "$RUN_JSON" | jq '.total_count')
+
           if [ "$COUNT" -eq 0 ]; then
             echo "No completed infra-bootstrap run found on main."
             exit 1
@@ -44,6 +47,7 @@ jobs:
           RUN_URL=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].html_url')
 
           echo "bootstrap_run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+
           echo "Latest infra-bootstrap run: ${RUN_URL}"
           echo "Latest infra-bootstrap conclusion: ${CONCLUSION}"
 
@@ -52,11 +56,14 @@ jobs:
             exit 1
           fi
 
+
   deploy-canary:
     needs: verify-infra-bootstrap
     runs-on: [self-hosted, linux, aws-vpc]
+
     outputs:
-      alb_hostname: ${{ steps.alb.outputs.hostname }}
+      canary_needed: ${{ steps.canary.outputs.needed }}
+
     steps:
       - name: Checkout merged main commit
         uses: actions/checkout@v4
@@ -70,16 +77,24 @@ jobs:
       - name: Install kubectl argo rollouts plugin
         run: |
           curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+
           chmod +x ./kubectl-argo-rollouts-linux-amd64
-          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 \
+            /usr/local/bin/kubectl-argo-rollouts
+
           kubectl argo rollouts version
 
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
+
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
           mkdir -p "$(dirname "$KUBECONFIG")"
+
           echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+
           aws eks update-kubeconfig \
             --name "${{ secrets.EKS_CLUSTER_NAME }}" \
             --region "${{ secrets.AWS_REGION }}" \
@@ -88,48 +103,106 @@ jobs:
       - name: Apply api-gateway manifests
         run: |
           set -euo pipefail
+
           kubectl apply -f kubernetes/api-gateway/
 
-      - name: Wait for rollout to reach canary pause
+      - name: Detect whether a canary actually started
+        id: canary
         run: |
           set -euo pipefail
 
+          # Give the Argo Rollouts controller time to reconcile.
+          sleep 15
+
+          STABLE=$(kubectl get rollout api-gateway \
+            -n petclinic \
+            -o jsonpath='{.status.stableRS}')
+
+          CURRENT=$(kubectl get rollout api-gateway \
+            -n petclinic \
+            -o jsonpath='{.status.currentPodHash}')
+
+          echo "Stable ReplicaSet hash: $STABLE"
+          echo "Current Pod hash:       $CURRENT"
+
+          if [ -z "$STABLE" ] || [ -z "$CURRENT" ]; then
+            echo "Unable to determine rollout hashes."
+            exit 1
+          fi
+
+          if [ "$STABLE" = "$CURRENT" ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+
+            echo "No new application revision detected."
+            echo "Skipping canary wait, smoke test, promotion, and rollback."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+
+            echo "New application revision detected."
+            echo "Continuing with canary deployment."
+          fi
+
+      - name: Wait for rollout to reach canary pause
+        if: steps.canary.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+
+          REASON=""
+
           for i in {1..60}; do
-            REASON=$(kubectl get rollout api-gateway -n petclinic -o jsonpath='{.status.pauseConditions[0].reason}' 2>/dev/null || true)
+            REASON=$(kubectl get rollout api-gateway \
+              -n petclinic \
+              -o jsonpath='{.status.pauseConditions[0].reason}' \
+              2>/dev/null || true)
+
+            echo "Attempt ${i}: pause reason = ${REASON:-none}"
+
             if [ "$REASON" = "CanaryPauseStep" ]; then
               echo "Rollout is paused at the canary step."
               break
             fi
+
             sleep 10
           done
 
           test "${REASON:-}" = "CanaryPauseStep"
-          kubectl argo rollouts get rollout api-gateway -n petclinic
+
+          kubectl argo rollouts get rollout \
+            api-gateway \
+            -n petclinic
 
       - name: Smoke test canary service inside cluster
+        if: steps.canary.outputs.needed == 'true'
         run: |
           set -euo pipefail
+
           kubectl -n petclinic run canary-smoke-${GITHUB_RUN_ID} \
-            --rm -i --restart=Never \
+            --rm -i \
+            --restart=Never \
             --image=curlimages/curl:8.10.1 \
             --command -- sh -c '
               set -e
-              curl -fsS http://api-gateway-canary:8080/actuator/health
-              curl -fsS http://api-gateway-canary:8080/api/customer/owners >/dev/null
+
+              curl -fsS \
+                http://api-gateway-canary:8080/actuator/health
+
+              curl -fsS \
+                http://api-gateway-canary:8080/api/customer/owners \
+                >/dev/null
             '
 
-      - name: Capture ALB hostname
-        id: alb
-        run: |
-          echo "hostname=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >> "$GITHUB_OUTPUT"
 
   promote:
     needs: deploy-canary
-    if: needs.deploy-canary.result == 'success'
+
+    if: ${{ needs.deploy-canary.result == 'success' && needs.deploy-canary.outputs.canary_needed == 'true' }}
+
     runs-on: [self-hosted, linux, aws-vpc]
+
     environment:
       name: production
-      url: http://${{ needs.deploy-canary.outputs.alb_hostname }}
+      url: https://petclinic.thedevopsportfolio.online
+
     steps:
       - name: Checkout merged main commit
         uses: actions/checkout@v4
@@ -143,16 +216,24 @@ jobs:
       - name: Install kubectl argo rollouts plugin
         run: |
           curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+
           chmod +x ./kubectl-argo-rollouts-linux-amd64
-          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 \
+            /usr/local/bin/kubectl-argo-rollouts
+
           kubectl argo rollouts version
 
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
+
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
           mkdir -p "$(dirname "$KUBECONFIG")"
+
           echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+
           aws eks update-kubeconfig \
             --name "${{ secrets.EKS_CLUSTER_NAME }}" \
             --region "${{ secrets.AWS_REGION }}" \
@@ -161,41 +242,74 @@ jobs:
       - name: Promote canary to full rollout
         run: |
           set -euo pipefail
-          kubectl argo rollouts promote api-gateway -n petclinic
-          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
-    
+
+          kubectl argo rollouts promote \
+            api-gateway \
+            -n petclinic
+
+          kubectl argo rollouts status \
+            api-gateway \
+            -n petclinic \
+            --timeout 600s
 
       - name: Debug api-gateway rollout state
         run: |
           set -euo pipefail
 
           echo "Rollout image:"
-          kubectl -n petclinic get rollout api-gateway -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+          kubectl -n petclinic get rollout api-gateway \
+            -o jsonpath='{.spec.template.spec.containers[0].image}'
+
           echo
-
           echo "ReplicaSets:"
-          kubectl -n petclinic get rs -l app.kubernetes.io/name=api-gateway
 
+          kubectl -n petclinic get rs \
+            -l app.kubernetes.io/name=api-gateway
+
+          echo
           echo "Pods:"
-          kubectl -n petclinic get pods -l app.kubernetes.io/name=api-gateway -o wide
 
+          kubectl -n petclinic get pods \
+            -l app.kubernetes.io/name=api-gateway \
+            -o wide
+
+          echo
           echo "Stable service welcome fragment:"
-          kubectl -n petclinic run stable-debug-${GITHUB_RUN_ID} \
-            --rm -i --restart=Never \
-            --image=curlimages/curl:8.10.1 \
-            --command -- sh -c 'curl -fsS http://api-gateway-stable:8080/scripts/fragments/welcome.html | sed -n "1,10p"'
 
-          echo "Canary service welcome fragment:"
-          kubectl -n petclinic run canary-debug-${GITHUB_RUN_ID} \
-            --rm -i --restart=Never \
+          kubectl -n petclinic run stable-debug-${GITHUB_RUN_ID} \
+            --rm -i \
+            --restart=Never \
             --image=curlimages/curl:8.10.1 \
-            --command -- sh -c 'curl -fsS http://api-gateway-canary:8080/scripts/fragments/welcome.html | sed -n "1,10p"'
+            --command -- sh -c '
+              curl -fsS \
+                http://api-gateway-stable:8080/scripts/fragments/welcome.html \
+                | sed -n "1,10p"
+            '
+
+          echo
+          echo "Canary service welcome fragment:"
+
+          kubectl -n petclinic run canary-debug-${GITHUB_RUN_ID} \
+            --rm -i \
+            --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c '
+              curl -fsS \
+                http://api-gateway-canary:8080/scripts/fragments/welcome.html \
+                | sed -n "1,10p"
+            '
 
 
   rollback:
-    needs: [deploy-canary, promote]
-    if: ${{ always() && needs.deploy-canary.result == 'success' && needs.promote.result != 'success' }}
+    needs:
+      - deploy-canary
+      - promote
+
+    if: ${{ always() && needs.deploy-canary.result == 'success' && needs.deploy-canary.outputs.canary_needed == 'true' && needs.promote.result != 'success' }}
+
     runs-on: [self-hosted, linux, aws-vpc]
+
     steps:
       - name: Checkout merged main commit
         uses: actions/checkout@v4
@@ -209,16 +323,24 @@ jobs:
       - name: Install kubectl argo rollouts plugin
         run: |
           curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+
           chmod +x ./kubectl-argo-rollouts-linux-amd64
-          sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+          sudo mv ./kubectl-argo-rollouts-linux-amd64 \
+            /usr/local/bin/kubectl-argo-rollouts
+
           kubectl argo rollouts version
 
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
+
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
           mkdir -p "$(dirname "$KUBECONFIG")"
+
           echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+
           aws eks update-kubeconfig \
             --name "${{ secrets.EKS_CLUSTER_NAME }}" \
             --region "${{ secrets.AWS_REGION }}" \
@@ -227,6 +349,16 @@ jobs:
       - name: Roll back to previous stable revision
         run: |
           set -euo pipefail
-          kubectl argo rollouts abort api-gateway -n petclinic || true
-          kubectl argo rollouts undo api-gateway -n petclinic
-          kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
+
+          kubectl argo rollouts abort \
+            api-gateway \
+            -n petclinic || true
+
+          kubectl argo rollouts undo \
+            api-gateway \
+            -n petclinic
+
+          kubectl argo rollouts status \
+            api-gateway \
+            -n petclinic \
+            --timeout 600s

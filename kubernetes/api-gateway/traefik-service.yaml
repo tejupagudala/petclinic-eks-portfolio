@@ -1,0 +1,12 @@
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata:
+  name: api-gateway-weighted
+  namespace: petclinic
+spec:
+  weighted:
+    services:
+      - name: api-gateway-stable
+        port: 8080
+      - name: api-gateway-canary
+        port: 8080

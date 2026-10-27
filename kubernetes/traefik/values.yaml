@@ -1,0 +1,24 @@
+deployment:
+  replicas: 2
+
+providers:
+  kubernetesCRD:
+    enabled: true
+  kubernetesIngress:
+    enabled: true
+
+service:
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+
+  spec:
+    type: LoadBalancer
+    loadBalancerClass: service.k8s.aws/nlb
+
+ports:
+  web:
+    exposedPort: 80
+
+  websecure:
+    exposedPort: 443
