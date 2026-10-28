@@ -340,6 +340,12 @@ jobs:
           kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -n argo-rollouts -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml"
           kubectl -n argo-rollouts patch deployment argo-rollouts --type=strategic -p '{"spec":{"template":{"spec":{"nodeSelector":{"role":"system"},"tolerations":[{"key":"CriticalAddonsOnly","operator":"Equal","value":"true","effect":"NoSchedule"}]}}}}'
+          # The built-in Traefik traffic router defaults to traefik.containo.us; Traefik v3
+          # serves only traefik.io. Without these flags every reconcile fails with
+          # TrafficRoutingError and the canary never scales up or writes weights.
+          CUR_ARGS=$(kubectl -n argo-rollouts get deployment argo-rollouts -o json | jq -c '.spec.template.spec.containers[0].args // []')
+          NEW_ARGS=$(echo "$CUR_ARGS" | jq -c '. + ["--traefik-api-group=traefik.io","--traefik-api-version=traefik.io/v1alpha1"] | unique')
+          kubectl -n argo-rollouts patch deployment argo-rollouts --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"argo-rollouts\",\"args\":${NEW_ARGS}}]}}}}"
           kubectl -n argo-rollouts rollout status deployment/argo-rollouts --timeout=600s
 
 
