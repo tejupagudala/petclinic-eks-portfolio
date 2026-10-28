@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       deploy_eck:
-        description: "Deploy legacy ECK logging POC"
+        description: "Deploy the ECK stack (Elasticsearch + Kibana). EDOT ships to it unless external Elastic secrets are set."
         type: boolean
-        default: false
+        default: true
         required: false
 
 concurrency:
@@ -547,6 +547,53 @@ jobs:
             --timeout 8m
 
           kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=300s
+
+      - name: Install Traefik ingress controller
+        run: |
+          set -euo pipefail
+          helm repo add traefik https://traefik.github.io/charts --force-update
+          helm repo update
+
+          # Service type LoadBalancer -> the AWS Load Balancer Controller provisions
+          # an NLB (loadBalancerClass service.k8s.aws/nlb in values.yaml).
+          helm upgrade --install traefik traefik/traefik \
+            --namespace traefik \
+            --create-namespace \
+            --version 41.7.1 \
+            -f kubernetes/traefik/values.yaml \
+            --wait \
+            --timeout 8m
+
+          for crd in ingressroutes.traefik.io traefikservices.traefik.io middlewares.traefik.io; do
+            kubectl wait --for=condition=Established "crd/$crd" --timeout=120s
+          done
+
+      - name: Configure TLS issuers and Traefik routes
+        run: |
+          set -euo pipefail
+
+          # ClusterIssuers (staging + prod) and the petclinic Certificates.
+          # cert-manager is installed above; the webhook must be answering.
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          kubectl apply -f kubernetes/cert-manager/
+
+          # Weighted TraefikService for the Argo Rollouts canary, HTTP->HTTPS
+          # middleware, and the two IngressRoutes. Applied by explicit path:
+          # the api-gateway directory also holds the Rollout, which Argo CD owns.
+          kubectl apply \
+            -f kubernetes/api-gateway/traefik-service.yaml \
+            -f kubernetes/api-gateway/https-redirect.yaml \
+            -f kubernetes/api-gateway/ingressroute.yaml \
+            -f kubernetes/api-gateway/ingressroute-http.yaml
+
+          # The NLB hostname changes on every rebuild; surface it for the DNS CNAME.
+          for i in $(seq 1 30); do
+            NLB=$(kubectl -n traefik get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            [ -n "$NLB" ] && break
+            sleep 10
+          done
+          echo "Traefik NLB hostname: ${NLB:-<not yet assigned>}"
+          echo "::notice title=Traefik NLB::Point the DNS CNAME at ${NLB:-<pending>}"
 
       - name: Install Elastic EDOT observability
         env:

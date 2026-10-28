@@ -12,7 +12,9 @@ alert_email                 = "teju.654@gmail.com"
 rds_instance_class          = "db.t3.micro"
 rds_allocated_storage       = 20
 rds_username                = "petclinic"
+cluster_version             = "1.35"
 eks_public_access_cidrs     = ["75.210.13.252/32"]
+aws_auth_role_arns          = ["arn:aws:iam::589077667712:user/terraform-bootsrap"]
 
 
 node_groups = {
