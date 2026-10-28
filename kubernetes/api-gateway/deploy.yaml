@@ -61,7 +61,7 @@ spec:
           emptyDir: {}
       containers:
         - name: api-gateway
-          image: tejupagudala/api-gateway:37854409083
+          image: tejupagudala/api-gateway:40621806600
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
