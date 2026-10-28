@@ -62,6 +62,10 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: k8s
+            - name: OTEL_SERVICE_NAME
+              value: customers-service
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment.name=portfolio,service.namespace=petclinic"
             - name: SERVER_PORT
               value: "8081"
             - name: SPRING_CONFIG_ADDITIONAL_LOCATION

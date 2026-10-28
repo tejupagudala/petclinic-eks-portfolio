@@ -78,6 +78,10 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: k8s
+            - name: OTEL_SERVICE_NAME
+              value: api-gateway
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment.name=portfolio,service.namespace=petclinic"
             - name: SPRING_CONFIG_LOCATION
               value: optional:file:/config/application.yml
             - name: SPRING_CLOUD_CONFIG_ENABLED
