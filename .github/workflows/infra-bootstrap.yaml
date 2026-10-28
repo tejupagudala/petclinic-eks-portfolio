@@ -455,7 +455,9 @@ jobs:
 
             echo "Elasticsearch phase=${PHASE} health=${HEALTH}"
 
-            if [ "$PHASE" = "Ready" ] && [ "$HEALTH" = "green" ]; then
+            # A single-node cluster is permanently yellow: replica shards have no
+          # second node to land on. Ready + not-red is the real success signal.
+          if [ "$PHASE" = "Ready" ] && [ "$HEALTH" != "red" ]; then
               exit 0
             fi
 
@@ -609,10 +611,6 @@ jobs:
           #    key for the collector. No secrets to manage, fully reproducible.
           if [ -n "${ELASTIC_ENDPOINT:-}" ] && [ -n "${ELASTIC_API_KEY:-}" ]; then
             echo "Using ELASTIC_ENDPOINT / ELASTIC_API_KEY from repository secrets."
-            # Public endpoint: trust the runner's system CA bundle.
-            for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
-              [ -f "$f" ] && CA_FILE="$f" && break
-            done
           else
             echo "Repository secrets not (fully) set; using in-cluster ECK Elasticsearch."
             ELASTIC_ENDPOINT="https://petclinic-logs-es-http.elastic.svc:9200"
@@ -628,11 +626,24 @@ jobs:
               -d '{"name":"edot-collector"}' | grep -o '"encoded":"[^"]*"' | cut -d'"' -f4)
             echo "::add-mask::${ELASTIC_API_KEY}"
             [ -n "$ELASTIC_API_KEY" ] || { echo "Failed to mint an Elasticsearch API key."; exit 1; }
-            # ECK publishes the CA that signed the ES HTTP certificate here.
-            CA_FILE="$RUNNER_TEMP/es-ca.crt"
-            kubectl -n elastic get secret petclinic-logs-es-http-certs-public \
-              -o go-template='{{index .data "ca.crt" | base64decode}}' > "$CA_FILE"
           fi
+
+          # Pick the CA from the endpoint, not from where the credentials came
+          # from: an in-cluster endpoint (*.svc / *.svc.cluster.local) is signed
+          # by ECK's CA whether the key was minted here or supplied as a secret;
+          # anything else is public and verifies against the system bundle.
+          case "$ELASTIC_ENDPOINT" in
+            *.svc:*|*.svc|*.svc.cluster.local*)
+              CA_FILE="$RUNNER_TEMP/es-ca.crt"
+              kubectl -n elastic get secret petclinic-logs-es-http-certs-public \
+                -o go-template='{{index .data "ca.crt" | base64decode}}' > "$CA_FILE"
+              ;;
+            *)
+              for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+                [ -f "$f" ] && CA_FILE="$f" && break
+              done
+              ;;
+          esac
           [ -s "${CA_FILE:-}" ] || { echo "No CA bundle found to publish for the collector."; exit 1; }
 
           echo "Adding OpenTelemetry Helm repository..."
