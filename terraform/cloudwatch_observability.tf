@@ -38,19 +38,19 @@ resource "aws_eks_addon" "eks_pod_identity_agent" {
   resolve_conflicts_on_update = "OVERWRITE"
 }
 
-resource "aws_eks_addon" "cloudwatch_observability" {
-  cluster_name                = module.eks.cluster_name
-  addon_name                  = "amazon-cloudwatch-observability"
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
+# resource "aws_eks_addon" "cloudwatch_observability" {
+#   cluster_name                = module.eks.cluster_name
+#   addon_name                  = "amazon-cloudwatch-observability"
+#   resolve_conflicts_on_create = "OVERWRITE"
+#   resolve_conflicts_on_update = "OVERWRITE"
 
-  pod_identity_association {
-    service_account = "cloudwatch-agent"
-    role_arn        = aws_iam_role.cloudwatch_observability_pod_identity.arn
-  }
+#   pod_identity_association {
+#     service_account = "cloudwatch-agent"
+#     role_arn        = aws_iam_role.cloudwatch_observability_pod_identity.arn
+#   }
 
-  depends_on = [
-    aws_iam_role_policy_attachment.cloudwatch_observability_agent,
-    aws_eks_addon.eks_pod_identity_agent
-  ]
-}
+#   depends_on = [
+#     aws_iam_role_policy_attachment.cloudwatch_observability_agent,
+#     aws_eks_addon.eks_pod_identity_agent
+#   ]
+# }
