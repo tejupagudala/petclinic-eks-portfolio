@@ -56,6 +56,27 @@ jobs:
           fi
           aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
 
+          # This job runs on a GitHub-hosted runner, and the cluster's public
+          # endpoint only admits the CIDRs in eks_public_access_cidrs. Without
+          # this, every kubectl call below times out and nothing gets reaped.
+          # Allow-list this runner's IP for the few minutes the cluster has left.
+          if ! kubectl get --raw=/version --request-timeout=15s >/dev/null 2>&1; then
+            RUNNER_IP=$(curl -fsS https://checkip.amazonaws.com)
+            CURRENT=$(aws eks describe-cluster --name "$CLUSTER" --region "$AWS_REGION" \
+              --query 'cluster.resourcesVpcConfig.publicAccessCidrs' --output text | tr '\t' ',')
+            echo "Runner ${RUNNER_IP} cannot reach the API server; adding it to publicAccessCidrs (${CURRENT})."
+            aws eks update-cluster-config --name "$CLUSTER" --region "$AWS_REGION" \
+              --resources-vpc-config "endpointPublicAccess=true,publicAccessCidrs=${CURRENT},${RUNNER_IP}/32" >/dev/null
+            aws eks wait cluster-active --name "$CLUSTER" --region "$AWS_REGION"
+            for i in $(seq 1 20); do
+              kubectl get --raw=/version --request-timeout=15s >/dev/null 2>&1 && break
+              sleep 15
+            done
+          fi
+          if ! kubectl get --raw=/version --request-timeout=15s >/dev/null 2>&1; then
+            echo "::warning::API server still unreachable; skipping in-cluster cleanup."
+          fi
+
           # Argo CD self-heals deleted ingresses back into existence: remove the
           # Applications first or the ALB gets recreated under us.
           kubectl delete applications --all -n argocd --ignore-not-found --timeout=120s || true
@@ -64,7 +85,7 @@ jobs:
           # Any other Service of type LoadBalancer.
           kubectl get svc -A --field-selector spec.type=LoadBalancer \
             -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null \
-            | while read -r ns name; do [ -n "$ns" ] && kubectl delete svc -n "$ns" "$name" --ignore-not-found || true; done
+            | while read -r ns name; do [ -n "$ns" ] && kubectl delete svc -n "$ns" "$name" --ignore-not-found || true; done || true
 
           echo "Waiting for load balancers and k8s security groups to clear..."
           for i in $(seq 1 40); do
