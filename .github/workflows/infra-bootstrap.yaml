@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       deploy_eck:
-        description: "Deploy legacy ECK logging POC"
+        description: "Deploy the ECK stack (Elasticsearch + Kibana). EDOT ships to it unless external Elastic secrets are set."
         type: boolean
-        default: false
+        default: true
         required: false
 
 concurrency:
@@ -489,35 +489,6 @@ jobs:
           exit 1
 
 
-      - name: Deploy Elastic Agent
-        if: ${{ inputs.deploy_eck }}
-        run: |
-          set -euo pipefail
-
-          kubectl apply -f kubernetes/elastic/elastic-agent.yaml
-
-          for i in {1..60}; do
-            HEALTH=$(kubectl -n elastic get agent petclinic-agent \
-              -o jsonpath='{.status.health}' 2>/dev/null || true)
-
-            AVAILABLE=$(kubectl -n elastic get agent petclinic-agent \
-              -o jsonpath='{.status.availableNodes}' 2>/dev/null || true)
-
-            EXPECTED=$(kubectl -n elastic get agent petclinic-agent \
-              -o jsonpath='{.status.expectedNodes}' 2>/dev/null || true)
-
-            echo "Agent health=${HEALTH} available=${AVAILABLE} expected=${EXPECTED}"
-
-            if [ "$HEALTH" = "green" ]; then
-              exit 0
-            fi
-
-            sleep 10
-          done
-
-          echo "Elastic Agent did not become healthy."
-          exit 1
-
       - name: Verify ECK logging stack
         if: ${{ inputs.deploy_eck }}
         run: |
@@ -577,6 +548,53 @@ jobs:
 
           kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=300s
 
+      - name: Install Traefik ingress controller
+        run: |
+          set -euo pipefail
+          helm repo add traefik https://traefik.github.io/charts --force-update
+          helm repo update
+
+          # Service type LoadBalancer -> the AWS Load Balancer Controller provisions
+          # an NLB (loadBalancerClass service.k8s.aws/nlb in values.yaml).
+          helm upgrade --install traefik traefik/traefik \
+            --namespace traefik \
+            --create-namespace \
+            --version 41.7.1 \
+            -f kubernetes/traefik/values.yaml \
+            --wait \
+            --timeout 8m
+
+          for crd in ingressroutes.traefik.io traefikservices.traefik.io middlewares.traefik.io; do
+            kubectl wait --for=condition=Established "crd/$crd" --timeout=120s
+          done
+
+      - name: Configure TLS issuers and Traefik routes
+        run: |
+          set -euo pipefail
+
+          # ClusterIssuers (staging + prod) and the petclinic Certificates.
+          # cert-manager is installed above; the webhook must be answering.
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          kubectl apply -f kubernetes/cert-manager/
+
+          # Weighted TraefikService for the Argo Rollouts canary, HTTP->HTTPS
+          # middleware, and the two IngressRoutes. Applied by explicit path:
+          # the api-gateway directory also holds the Rollout, which Argo CD owns.
+          kubectl apply \
+            -f kubernetes/api-gateway/traefik-service.yaml \
+            -f kubernetes/api-gateway/https-redirect.yaml \
+            -f kubernetes/api-gateway/ingressroute.yaml \
+            -f kubernetes/api-gateway/ingressroute-http.yaml
+
+          # The NLB hostname changes on every rebuild; surface it for the DNS CNAME.
+          for i in $(seq 1 30); do
+            NLB=$(kubectl -n traefik get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            [ -n "$NLB" ] && break
+            sleep 10
+          done
+          echo "Traefik NLB hostname: ${NLB:-<not yet assigned>}"
+          echo "::notice title=Traefik NLB::Point the DNS CNAME at ${NLB:-<pending>}"
+
       - name: Install Elastic EDOT observability
         env:
           ELASTIC_ENDPOINT: ${{ secrets.ELASTIC_ENDPOINT }}
@@ -584,12 +602,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fail loudly rather than creating an empty secret, which would
-          # leave the collectors running and silently shipping nowhere.
-          if [ -z "${ELASTIC_ENDPOINT:-}" ] || [ -z "${ELASTIC_API_KEY:-}" ]; then
-            echo "ELASTIC_ENDPOINT and/or ELASTIC_API_KEY repository secrets are not set."
-            exit 1
+          # Two ways to reach Elasticsearch:
+          #  - both ELASTIC_ENDPOINT and ELASTIC_API_KEY repository secrets set
+          #    (e.g. Elastic Cloud): use them as-is.
+          #  - otherwise: target the in-cluster ECK Elasticsearch and mint an API
+          #    key for the collector. No secrets to manage, fully reproducible.
+          if [ -n "${ELASTIC_ENDPOINT:-}" ] && [ -n "${ELASTIC_API_KEY:-}" ]; then
+            echo "Using ELASTIC_ENDPOINT / ELASTIC_API_KEY from repository secrets."
+            # Public endpoint: trust the runner's system CA bundle.
+            for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+              [ -f "$f" ] && CA_FILE="$f" && break
+            done
+          else
+            echo "Repository secrets not (fully) set; using in-cluster ECK Elasticsearch."
+            ELASTIC_ENDPOINT="https://petclinic-logs-es-http.elastic.svc:9200"
+            ES_PW=$(kubectl -n elastic get secret petclinic-logs-es-elastic-user \
+              -o go-template='{{.data.elastic | base64decode}}')
+            echo "::add-mask::${ES_PW}"
+            # curl runs inside the ES pod: the runner cannot reach the ClusterIP
+            # service, and the ES image ships curl. The "encoded" field is the
+            # base64 id:key form the elasticsearch exporter expects.
+            ELASTIC_API_KEY=$(kubectl -n elastic exec petclinic-logs-es-default-0 -c elasticsearch -- \
+              curl -sk -u "elastic:${ES_PW}" -H 'Content-Type: application/json' \
+              -X POST https://localhost:9200/_security/api_key \
+              -d '{"name":"edot-collector"}' | grep -o '"encoded":"[^"]*"' | cut -d'"' -f4)
+            echo "::add-mask::${ELASTIC_API_KEY}"
+            [ -n "$ELASTIC_API_KEY" ] || { echo "Failed to mint an Elasticsearch API key."; exit 1; }
+            # ECK publishes the CA that signed the ES HTTP certificate here.
+            CA_FILE="$RUNNER_TEMP/es-ca.crt"
+            kubectl -n elastic get secret petclinic-logs-es-http-certs-public \
+              -o go-template='{{index .data "ca.crt" | base64decode}}' > "$CA_FILE"
           fi
+          [ -s "${CA_FILE:-}" ] || { echo "No CA bundle found to publish for the collector."; exit 1; }
 
           echo "Adding OpenTelemetry Helm repository..."
           helm repo add open-telemetry \
@@ -611,12 +655,20 @@ jobs:
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
+          echo "Publishing the Elasticsearch CA for the gateway exporter..."
+          kubectl create secret generic elastic-es-ca \
+            --namespace opentelemetry-operator-system \
+            --from-file=ca.crt="$CA_FILE" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
           echo "Installing EDOT..."
           helm upgrade --install opentelemetry-kube-stack \
             open-telemetry/opentelemetry-kube-stack \
             --namespace opentelemetry-operator-system \
             --values "https://raw.githubusercontent.com/elastic/elastic-agent/refs/tags/v9.5.5/deploy/helm/edot-collector/kube-stack/values.yaml" \
             --values kubernetes/elastic/otel-values.yaml \
+            --set crds.installPrometheus=false \
             --version "0.16.0" \
             --wait \
             --timeout 10m

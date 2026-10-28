@@ -25,9 +25,17 @@ spec:
 
       containers:
         - name: kibana
+          # Kibana derives its V8 heap from the container limit. At a 1Gi
+          # limit the heap landed near 700MB, which the Observability
+          # onboarding pages exhaust -- Kibana died with a JavaScript heap
+          # OOM and the UI reported "Unable to load content". Set the heap
+          # explicitly so it does not depend on auto-detection.
+          env:
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1800"
           resources:
             requests:
               cpu: "250m"
-              memory: "512Mi"
-            limits:
               memory: "1Gi"
+            limits:
+              memory: "2Gi"

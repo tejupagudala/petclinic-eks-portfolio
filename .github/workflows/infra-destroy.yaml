@@ -37,6 +37,51 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
+      - name: Reap Kubernetes-created AWS resources before destroy
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -uo pipefail
+          CLUSTER="${CLUSTER_NAME:-demo-eks-cluster}"
+
+          # Load balancers (ALB/NLB) and their security groups are created by the
+          # AWS Load Balancer Controller from Ingress/Service objects, so they are
+          # invisible to Terraform. If the cluster is deleted first, nothing can
+          # reap them and `terraform destroy` fails on DependencyViolation for the
+          # subnets, IGW and VPC. Delete the Kubernetes objects while the
+          # controller is still alive, then wait for AWS to catch up.
+          if ! aws eks describe-cluster --name "$CLUSTER" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Cluster $CLUSTER not found; nothing to reap."
+            exit 0
+          fi
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+
+          # Argo CD self-heals deleted ingresses back into existence: remove the
+          # Applications first or the ALB gets recreated under us.
+          kubectl delete applications --all -n argocd --ignore-not-found --timeout=120s || true
+          kubectl delete ingress --all -A --ignore-not-found --timeout=120s || true
+          helm uninstall traefik -n traefik --timeout 3m 2>/dev/null || true
+          # Any other Service of type LoadBalancer.
+          kubectl get svc -A --field-selector spec.type=LoadBalancer \
+            -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null \
+            | while read -r ns name; do [ -n "$ns" ] && kubectl delete svc -n "$ns" "$name" --ignore-not-found || true; done
+
+          echo "Waiting for load balancers and k8s security groups to clear..."
+          for i in $(seq 1 40); do
+            LB=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query 'length(LoadBalancers)' --output text 2>/dev/null || echo 1)
+            SG=$(aws ec2 describe-security-groups --region "$AWS_REGION" --filters "Name=group-name,Values=k8s-*" --query 'length(SecurityGroups)' --output text 2>/dev/null || echo 1)
+            echo "  [$i] load balancers=$LB  k8s security groups=$SG"
+            if [ "$LB" = "0" ] && [ "$SG" = "0" ]; then break; fi
+            # Security groups linger after their LB is gone; remove them once free.
+            if [ "$LB" = "0" ]; then
+              for sg in $(aws ec2 describe-security-groups --region "$AWS_REGION" --filters "Name=group-name,Values=k8s-*" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null); do
+                aws ec2 delete-security-group --region "$AWS_REGION" --group-id "$sg" 2>/dev/null || true
+              done
+            fi
+            sleep 15
+          done
+          echo "Pre-destroy cleanup finished (load balancers=$LB, k8s security groups=$SG)."
+
       - name: Destroy infrastructure
         run: |
           terraform -chdir=terraform init -input=false

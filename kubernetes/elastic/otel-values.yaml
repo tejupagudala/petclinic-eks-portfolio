@@ -55,3 +55,23 @@ collectors:
       limits:
         cpu: 750m
         memory: 1Gi
+
+    # The gateway is the only collector that talks to Elasticsearch. The
+    # bootstrap publishes the CA that signed the Elasticsearch certificate
+    # into the `elastic-es-ca` secret (ECK's CA for in-cluster ES, the system
+    # bundle for a public endpoint) so the exporter verifies TLS properly
+    # instead of skipping verification. Helm deep-merges `config` onto the
+    # upstream exporter definition (endpoints / api_key / mapping stay).
+    volumes:
+      - name: elastic-es-ca
+        secret:
+          secretName: elastic-es-ca
+    volumeMounts:
+      - name: elastic-es-ca
+        mountPath: /etc/elastic-ca
+        readOnly: true
+    config:
+      exporters:
+        elasticsearch/otel:
+          tls:
+            ca_file: /etc/elastic-ca/ca.crt
