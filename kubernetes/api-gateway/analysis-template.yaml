@@ -19,9 +19,9 @@ spec:
         prometheus:
           address: "{{args.prometheus-address}}"
           query: |
-            sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status!~"5.."}[2m]))
-            /
-            clamp_min(sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m])), 0.001)
+           (sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status!~"5.."}[2m]))or vector(0))
+           /
+           clamp_min((sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m]))or vector(0)),0.001)
 
     - name: canary-5xx-rate
       interval: 1m
@@ -32,9 +32,18 @@ spec:
         prometheus:
           address: "{{args.prometheus-address}}"
           query: |
-            sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status=~"5.."}[2m]))
+            (
+              sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}",status=~"5.."}[2m]))
+              or vector(0)
+            )
             /
-            clamp_min(sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m])), 0.001)
+            clamp_min(
+              (
+                sum(rate(http_server_requests_seconds_count{service="{{args.canary-service}}"}[2m]))
+                or vector(0)
+              ),
+              0.001
+            )
 
 # this tells Argo Rollouts what “healthy canary” means
 # success rate and 5xx rate are good first metrics
