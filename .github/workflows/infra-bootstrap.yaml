@@ -909,7 +909,8 @@ jobs:
         run: |
           set -euo pipefail
           kubectl -n monitoring get servicemonitors
-          kubectl -n monitoring describe servicemonitor api-gateway-sm || true
+          kubectl -n monitoring describe servicemonitor api-gateway-stable-sm || true
+          kubectl -n monitoring describe servicemonitor api-gateway-canary-sm || true
           kubectl -n petclinic get svc
 
       - name: Refresh AWS credentials before readiness checks
