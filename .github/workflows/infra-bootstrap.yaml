@@ -583,6 +583,9 @@ jobs:
           # ClusterIssuers (staging + prod) and the petclinic Certificates.
           # cert-manager is installed above; the webhook must be answering.
           kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          # The Certificates live in the petclinic namespace, which Argo CD may not
+          # have created yet at this point; make sure it exists first.
+          kubectl apply -f kubernetes/petclinic-namespace.yaml
           kubectl apply -f kubernetes/cert-manager/
 
           # Weighted TraefikService for the Argo Rollouts canary, HTTP->HTTPS
@@ -787,7 +790,7 @@ jobs:
             fi
           fi
 
-          kubectl create namespace petclinic --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f kubernetes/petclinic-namespace.yaml
           if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
             kubectl apply -f kubernetes/monitoring/petclinic-servicemonitor.yml
           fi
