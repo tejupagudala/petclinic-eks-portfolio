@@ -698,6 +698,20 @@ jobs:
             --timeout 10m
 
 
+      - name: Re-create app pods that predate the OpenTelemetry operator
+        run: |
+          set -euo pipefail
+          # Argo CD syncs api-gateway and vets-service minutes before the EDOT
+          # step installs the OpenTelemetry operator, so those pods miss the
+          # Java auto-instrumentation webhook and never emit traces. A rolling
+          # restart re-creates them through the (now running) webhook.
+          if kubectl -n petclinic get deployment vets-service >/dev/null 2>&1; then
+            kubectl -n petclinic rollout restart deployment/vets-service
+          fi
+          if kubectl -n petclinic get rollout api-gateway >/dev/null 2>&1; then
+            kubectl argo rollouts restart api-gateway -n petclinic
+          fi
+
       - name: Verify AWS Load Balancer Controller IRSA
         run: |
           set -euo pipefail
