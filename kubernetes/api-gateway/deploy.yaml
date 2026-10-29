@@ -90,16 +90,6 @@ spec:
               value: "false"
             - name: EUREKA_CLIENT_ENABLED
               value: "false"
-            - name: DB_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-credentials
-                  key: username
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-credentials
-                  key: password
           volumeMounts:
             - name: app-config
               mountPath: /config/application.yml
