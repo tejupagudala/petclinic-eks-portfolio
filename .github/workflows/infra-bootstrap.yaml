@@ -546,6 +546,27 @@ jobs:
           echo
           echo "Petclinic Kibana dashboard restored."
 
+          echo "Importing Petclinic alert rules..."
+          "${KB_CURL[@]}" -X POST \
+            "https://${KB_HOST}:${KB_PORT}/api/saved_objects/_import?overwrite=true" \
+            -H "kbn-xsrf: true" \
+            --form file=@"kubernetes/elastic/alerts/petclinic-alerts.ndjson"
+
+          echo
+          echo "Re-enabling imported alert rules..."
+          # Imported rules always arrive disabled; enabling re-creates their API keys.
+          for RULE_ID in \
+            a48298bc-b981-43ce-8390-a9370c08e964 \
+            b8f34a97-b252-41f6-8e49-085034accb0f
+          do
+            "${KB_CURL[@]}" -X POST \
+              "https://${KB_HOST}:${KB_PORT}/api/alerting/rule/${RULE_ID}/_enable" \
+              -H "kbn-xsrf: true"
+          done
+
+          echo
+          echo "Petclinic alert rules restored and enabled."
+
       - name: Verify ECK logging stack
         if: ${{ inputs.deploy_eck }}
         run: |
