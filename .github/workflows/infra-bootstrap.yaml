@@ -497,6 +497,55 @@ jobs:
           exit 1
 
 
+      - name: Restore Petclinic Kibana dashboard
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+          DASHBOARD_FILE="kubernetes/elastic/dashboards/petclinic-observability.ndjson"
+          [ -f "$DASHBOARD_FILE" ] || { echo "Dashboard export not found: $DASHBOARD_FILE"; exit 1; }
+
+          ES_PW=$(kubectl -n elastic get secret petclinic-logs-es-elastic-user \
+            -o go-template='{{.data.elastic | base64decode}}')
+          echo "::add-mask::${ES_PW}"
+
+          # ECK serves Kibana over HTTPS with a self-signed cert whose SANs are the
+          # in-cluster service names, so verify against the ECK CA and present
+          # the service hostname rather than localhost.
+          KB_HOST="petclinic-kibana-kb-http.elastic.svc"
+          KB_PORT=15601
+          KB_CA="$RUNNER_TEMP/kibana-ca.crt"
+          kubectl -n elastic get secret petclinic-kibana-kb-http-certs-public \
+            -o go-template='{{index .data "ca.crt" | base64decode}}' > "$KB_CA"
+
+          echo "Starting temporary Kibana port-forward..."
+          kubectl -n elastic port-forward svc/petclinic-kibana-kb-http "${KB_PORT}:5601" \
+            >"$RUNNER_TEMP/kibana-port-forward.log" 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+
+          KB_CURL=(curl -fsS --cacert "$KB_CA" --resolve "${KB_HOST}:${KB_PORT}:127.0.0.1" -u "elastic:${ES_PW}")
+
+          echo "Waiting for Kibana API..."
+          for i in $(seq 1 60); do
+            if "${KB_CURL[@]}" "https://${KB_HOST}:${KB_PORT}/api/status" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "Kibana API did not become reachable."
+              cat "$RUNNER_TEMP/kibana-port-forward.log" || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Importing Petclinic dashboard..."
+          "${KB_CURL[@]}" -X POST \
+            "https://${KB_HOST}:${KB_PORT}/api/saved_objects/_import?overwrite=true" \
+            -H "kbn-xsrf: true" \
+            --form file=@"${DASHBOARD_FILE}"
+          echo
+          echo "Petclinic Kibana dashboard restored."
+
       - name: Verify ECK logging stack
         if: ${{ inputs.deploy_eck }}
         run: |
