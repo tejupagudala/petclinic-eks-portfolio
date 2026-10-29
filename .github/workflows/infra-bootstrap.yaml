@@ -610,6 +610,7 @@ jobs:
         env:
           ELASTIC_ENDPOINT: ${{ secrets.ELASTIC_ENDPOINT }}
           ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
+          DEPLOY_ECK: ${{ inputs.deploy_eck }}
         run: |
           set -euo pipefail
 
@@ -618,7 +619,10 @@ jobs:
           #    (e.g. Elastic Cloud): use them as-is.
           #  - otherwise: target the in-cluster ECK Elasticsearch and mint an API
           #    key for the collector. No secrets to manage, fully reproducible.
-          if [ -n "${ELASTIC_ENDPOINT:-}" ] && [ -n "${ELASTIC_API_KEY:-}" ]; then
+          # When ECK is deployed in-cluster, always mint a fresh key against it:
+          # repository secrets minted on a previous cluster are dead after a
+          # rebuild and the exporter fails with 401 (security_exception).
+          if [ "${DEPLOY_ECK}" != "true" ] && [ -n "${ELASTIC_ENDPOINT:-}" ] && [ -n "${ELASTIC_API_KEY:-}" ]; then
             echo "Using ELASTIC_ENDPOINT / ELASTIC_API_KEY from repository secrets."
           else
             echo "Repository secrets not (fully) set; using in-cluster ECK Elasticsearch."
