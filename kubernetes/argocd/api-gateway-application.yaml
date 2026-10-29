@@ -12,7 +12,25 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: petclinic
+  # Argo Rollouts stamps rollouts-pod-template-hash into the stable/canary
+  # Service selectors to steer traffic. Leave those keys to Rollouts so Argo CD
+  # neither reports drift on them nor rewrites them during a sync.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      name: api-gateway-stable
+      namespace: petclinic
+      jsonPointers:
+        - /spec/selector/rollouts-pod-template-hash
+    - group: ""
+      kind: Service
+      name: api-gateway-canary
+      namespace: petclinic
+      jsonPointers:
+        - /spec/selector/rollouts-pod-template-hash
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
