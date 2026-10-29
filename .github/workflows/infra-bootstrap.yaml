@@ -862,9 +862,9 @@ jobs:
           kubectl -n petclinic rollout status deployment/visits-service --timeout=600s
           kubectl argo rollouts status api-gateway -n petclinic --timeout 600s
           for i in {1..60}; do
-            ALB=$(kubectl -n petclinic get ingress frontend-proxyr -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            ALB=$(kubectl -n traefik get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB" ]; then
-              echo "Petclinic ingress hostname: $ALB"
+              echo "Petclinic Traefik NLB hostname: $ALB"
               break
             fi
             sleep 10
