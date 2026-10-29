@@ -330,6 +330,13 @@ jobs:
 
       - name: Register Argo CD Applications
         run: |
+          # The Applications deploy into the petclinic namespace and have no
+          # CreateNamespace option. If the namespace does not exist yet, every
+          # automated sync fails, Argo CD gives up after five retries, and the
+          # final "Wait for Argo CD apps to sync" times out. Create it first,
+          # from the manifest, so the OpenTelemetry inject annotation is on it
+          # from the very first pod.
+          kubectl apply -f kubernetes/petclinic-namespace.yaml
           kubectl apply -f kubernetes/argocd/ -n argocd
           kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=120s
 
@@ -906,6 +913,17 @@ jobs:
 
       - name: Wait for Argo CD apps to sync
         run: |
+          # If an earlier automated sync failed and exhausted its retries, Argo CD
+          # will not try again until the Git revision changes. Kick a fresh sync
+          # for any app whose last operation failed before waiting.
+          for app in $(kubectl -n argocd get applications -o name); do
+            PHASE=$(kubectl -n argocd get "$app" -o jsonpath='{.status.operationState.phase}')
+            if [ "$PHASE" = "Failed" ] || [ "$PHASE" = "Error" ]; then
+              echo "Re-syncing ${app} (last operation: ${PHASE})"
+              kubectl -n argocd patch "$app" --type merge \
+                -p '{"operation":{"initiatedBy":{"username":"infra-bootstrap"},"sync":{"revision":"HEAD","prune":false}}}'
+            fi
+          done
           kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced --all applications --timeout=10m
           kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy --all applications --timeout=10m
 
