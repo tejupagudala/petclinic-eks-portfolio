@@ -37,6 +37,43 @@ resource "elasticstack_kibana_synthetics_private_location" "petclinic" {
   tags            = ["petclinic", "managed-by-terraform"]
 }
 
+# Uptime checks that run from the in-cluster private location every minute.
+resource "elasticstack_kibana_synthetics_monitor" "demo_service_internal" {
+  name              = "observability-demo-service-internal"
+  schedule          = 1
+  timeout           = 16
+  private_locations = [elasticstack_kibana_synthetics_private_location.petclinic.label]
+  service_name      = "observability-demo-service"
+  tags              = ["petclinic", "managed-by-terraform"]
+
+  # In-cluster DNS: checks the service directly, independent of Traefik and DNS.
+  http = {
+    url           = "http://observability-demo-service.petclinic.svc.cluster.local:8084/hello"
+    max_redirects = 0
+    mode          = "any"
+    ipv4          = true
+    ipv6          = true
+  }
+}
+
+resource "elasticstack_kibana_synthetics_monitor" "petclinic_public" {
+  name              = "petclinic-public"
+  schedule          = 1
+  timeout           = 16
+  private_locations = [elasticstack_kibana_synthetics_private_location.petclinic.label]
+  service_name      = "api-gateway"
+  tags              = ["petclinic", "managed-by-terraform"]
+
+  # The public URL: exercises GoDaddy DNS, the Traefik NLB, TLS and the gateway.
+  http = {
+    url           = "https://petclinic.thedevopsportfolio.online"
+    max_redirects = 0
+    mode          = "any"
+    ipv4          = true
+    ipv6          = true
+  }
+}
+
 module "observability_demo" {
   source = "../modules/observability-alerts"
 
