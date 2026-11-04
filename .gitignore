@@ -40,3 +40,7 @@ kubeconfig*
 # Mac
 .DS_Store
 .env
+
+# Terraform plan files
+**/tfplan
+**/*.tfplan
