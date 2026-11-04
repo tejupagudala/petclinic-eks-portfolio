@@ -3,7 +3,7 @@ namespace: petclinic
 
 image:
   repository: tejupagudala/observability-demo-service
-  tag: "41850603582"
+  tag: "41885112791"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
