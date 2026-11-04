@@ -1,5 +1,6 @@
 terraform {
-  required_version = ">= 1.5"
+  # backend.tf uses S3-native locking (use_lockfile), which needs Terraform 1.10+.
+  required_version = ">= 1.10"
 
   required_providers {
     elasticstack = {
@@ -9,9 +10,17 @@ terraform {
   }
 }
 
+# The Kibana endpoint and credentials come from the environment, so the same
+# code runs from a laptop and from infra-bootstrap:
+#   KIBANA_ENDPOINT  e.g. https://127.0.0.1:5601 (a kubectl port-forward)
+#   KIBANA_USERNAME  elastic
+#   KIBANA_PASSWORD  from secret elastic/petclinic-logs-es-elastic-user
 provider "elasticstack" {
   kibana {
-    endpoints = ["https://localhost:5601"]
-    insecure  = true
+    # Kibana is only reached through a kubectl port-forward on loopback. ECK's
+    # self-signed certificate names the in-cluster Service, not localhost, so
+    # hostname verification cannot pass. The hop that leaves the machine is
+    # already inside kubectl's authenticated TLS tunnel to the API server.
+    insecure = true
   }
 }
