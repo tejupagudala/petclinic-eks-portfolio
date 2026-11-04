@@ -18,10 +18,8 @@ public class ObservabilityDemoServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(ObservabilityDemoServiceApplication.class, args);
     }
-
     @GetMapping("/hello")
-    public String hello() throws InterruptedException {
-       Thread.sleep(500);
-       return "Hello";
+    public String hello() {
+        return "Hello";
     }
 }
