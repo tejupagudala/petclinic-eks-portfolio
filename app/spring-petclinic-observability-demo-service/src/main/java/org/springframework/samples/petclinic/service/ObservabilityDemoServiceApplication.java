@@ -20,9 +20,8 @@ public class ObservabilityDemoServiceApplication {
     }
 
     @GetMapping("/hello")
-    public String hello() {
-        log.info("observability-demo-service received hello request");
-
-        return "hello from observability-demo-service";
+    public String hello() throws InterruptedException {
+       Thread.sleep(500);
+       return "Hello";
     }
 }
