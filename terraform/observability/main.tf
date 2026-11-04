@@ -1,5 +1,6 @@
-# Every alert rule and connector in Kibana is defined here and applied by
-# infra-bootstrap, so a teardown and rebuild restores alerting with no clicks.
+# Every alert rule, connector and Synthetics private location in Kibana is
+# defined here and applied by infra-bootstrap, so a teardown and rebuild
+# restores them with no clicks.
 
 # Built-in Server log connector: fired alerts are written to the Kibana log.
 # Managed in code so it exists on every rebuild (no hand-made connectors).
@@ -25,6 +26,15 @@ module "api_gateway" {
   error_log_count_threshold = 5
   cpu_threshold             = 0.80
   memory_threshold          = 0.80
+}
+
+# Synthetics private location: lets monitors run from the synthetics-agent pod
+# inside the cluster. Its Fleet agent policy is preconfigured with this fixed id
+# in kubernetes/elastic/kibana.yaml; this registers it with Synthetics.
+resource "elasticstack_kibana_synthetics_private_location" "petclinic" {
+  label           = "petclinic-eks"
+  agent_policy_id = "synthetics-private-location"
+  tags            = ["petclinic", "managed-by-terraform"]
 }
 
 module "observability_demo" {

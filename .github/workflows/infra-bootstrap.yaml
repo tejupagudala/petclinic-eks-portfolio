@@ -552,7 +552,7 @@ jobs:
             --form file=@"${DASHBOARD_FILE}"
           echo
           echo "Petclinic Kibana dashboard restored."
-          # Alert rules are applied by Terraform in "Apply Kibana alert rules" at the end of this job.
+          # Alert rules are applied by Terraform in the last step of this job.
 
       - name: Verify ECK logging stack
         if: ${{ inputs.deploy_eck }}
@@ -994,11 +994,41 @@ jobs:
           cat /tmp/api-gateway-portforward.log || true
           exit 1
 
-      # Alert rules and their connector live in terraform/observability. This runs
-      # last so a failure here cannot block the platform, and EDOT data is already
-      # flowing. The S3 state still lists the previous cluster's rules; the
-      # provider reads them as gone and recreates them, so no state surgery.
-      - name: Apply Kibana alert rules (Terraform)
+      # Fleet Server, then the Synthetics private-location agent. Both Fleet
+      # policies are preconfigured in kibana.yaml with fixed ids, so a fresh
+      # Kibana already has them and these agents enroll with no clicks.
+      - name: Deploy Fleet Server and Synthetics agent
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          wait_agent() {
+            for i in $(seq 1 60); do
+              HEALTH=$(kubectl -n elastic get agent "$1" -o jsonpath='{.status.health}' 2>/dev/null || true)
+              echo "$1 health=${HEALTH}"
+              if [ "$HEALTH" = "green" ]; then
+                return 0
+              fi
+              sleep 10
+            done
+            echo "$1 did not become healthy."
+            kubectl -n elastic describe agent "$1" || true
+            kubectl -n elastic logs -l "agent.k8s.elastic.co/name=$1" --tail=100 || true
+            return 1
+          }
+
+          kubectl apply -f kubernetes/elastic/fleet-server.yaml
+          wait_agent fleet-server
+
+          kubectl apply -f kubernetes/elastic/synthetics-agent.yaml
+          wait_agent synthetics-agent
+
+      # Alert rules, their connector and the Synthetics private location live in
+      # terraform/observability. This runs last so a failure here cannot block the
+      # platform, and EDOT data is already flowing. The S3 state still lists the
+      # previous cluster's objects; the provider reads them as gone and recreates
+      # them, so no state surgery.
+      - name: Apply Kibana alert rules and Synthetics location (Terraform)
         if: ${{ inputs.deploy_eck }}
         run: |
           set -euo pipefail
