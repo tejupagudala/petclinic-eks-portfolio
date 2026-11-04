@@ -1,0 +1,111 @@
+name: observability-demo-service-ci
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "app/spring-petclinic-observability-demo-service/**"
+      - "app/pom.xml"
+      - "kubernetes/observability-demo-service/**"
+      - "kubernetes/charts/observable-java-service/**"
+      - ".github/workflows/observability-demo-service-ci.yaml"
+
+  push:
+    branches: [ main ]
+    paths:
+      - "app/spring-petclinic-observability-demo-service/**"
+      - "app/pom.xml"
+      - "kubernetes/observability-demo-service/**"
+      - "kubernetes/charts/observable-java-service/**"
+      - ".github/workflows/observability-demo-service-ci.yaml"
+
+permissions:
+  contents: read
+
+env:
+  SERVICE_NAME: observability-demo-service
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/observability-demo-service
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build service
+        run: |
+          cd app
+
+          ./mvnw \
+            -pl spring-petclinic-observability-demo-service \
+            -am \
+            clean package \
+            -DskipTests
+
+
+  helm-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: |
+          helm lint kubernetes/charts/observable-java-service
+
+      - name: Render demo service
+        run: |
+          helm template observability-demo-service \
+            kubernetes/charts/observable-java-service \
+            -f kubernetes/observability-demo-service/values.yaml
+
+
+  docker-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    needs:
+      - build
+      - helm-validate
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          file: app/spring-petclinic-observability-demo-service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+
+      - name: Show published image
+        run: |
+          echo "Published image:"
+          echo "${DOCKER_IMAGE}:${GITHUB_SHA}"

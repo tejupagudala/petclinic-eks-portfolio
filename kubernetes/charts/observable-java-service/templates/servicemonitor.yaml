@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: "{{ .Values.serviceName }}-sm"
+  namespace: "{{ .Values.prometheus.namespace }}"
+
+  labels:
+    release: "{{ .Values.prometheus.releaseLabel }}"
+
+spec:
+  namespaceSelector:
+    matchNames:
+      - "{{ .Values.namespace }}"
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ .Values.serviceName }}"
+
+  jobLabel: app.kubernetes.io/name
+
+  endpoints:
+    - port: http
+      path: "{{ .Values.prometheus.path }}"
+      interval: "{{ .Values.prometheus.interval }}"

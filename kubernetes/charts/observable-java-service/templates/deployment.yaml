@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: {{ .Values.serviceName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.serviceName }}
+    app.kubernetes.io/part-of: {{ .Values.observability.serviceNamespace }}
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.serviceName }}
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.serviceName }}
+        app.kubernetes.io/part-of: {{ .Values.observability.serviceNamespace }}
+      annotations:
+        instrumentation.opentelemetry.io/inject-java: "opentelemetry-operator-system/elastic-instrumentation"
+
+    spec:
+      nodeSelector:
+        role: {{ .Values.nodeSelector.role | quote }}
+
+      tolerations:
+        - key: {{ (index .Values.tolerations 0).key | quote }}
+          operator: {{ (index .Values.tolerations 0).operator | quote }}
+          value: {{ (index .Values.tolerations 0).value | quote }}
+          effect: {{ (index .Values.tolerations 0).effect | quote }}
+
+      containers:
+        - name: {{ .Values.serviceName }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.serviceName | quote }}
+
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace={{ .Values.observability.serviceNamespace }},deployment.environment.name={{ .Values.observability.environment }},service.version={{ .Values.image.tag }}"
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
