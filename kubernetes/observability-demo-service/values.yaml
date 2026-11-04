@@ -1,0 +1,40 @@
+serviceName: observability-demo-service
+namespace: petclinic
+
+image:
+  repository: tejupagudala/observability-demo-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  port: 8084
+
+observability:
+  environment: portfolio
+  serviceNamespace: petclinic
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector:
+  role: backend
+
+tolerations:
+  - key: workload
+    operator: Equal
+    value: backend
+    effect: NoSchedule
+
+prometheus:
+  enabled: true
+  namespace: monitoring
+  path: /actuator/prometheus
+  interval: 30s
+  releaseLabel: kube-prometheus-stack

@@ -1,0 +1,23 @@
+server:
+  port: __PORT__
+
+spring:
+  application:
+    name: __SERVICE_NAME__
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
