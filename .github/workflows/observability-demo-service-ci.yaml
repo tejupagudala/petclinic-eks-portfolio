@@ -8,15 +8,7 @@ on:
       - "app/pom.xml"
       - "kubernetes/observability-demo-service/**"
       - "kubernetes/charts/observable-java-service/**"
-      - ".github/workflows/observability-demo-service-ci.yaml"
-
-  push:
-    branches: [ main ]
-    paths:
-      - "app/spring-petclinic-observability-demo-service/**"
-      - "app/pom.xml"
-      - "kubernetes/observability-demo-service/**"
-      - "kubernetes/charts/observable-java-service/**"
+      - "kubernetes/argocd/observability-demo-service-application.yaml"
       - ".github/workflows/observability-demo-service-ci.yaml"
 
 permissions:
@@ -75,11 +67,11 @@ jobs:
 
 
   docker-publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
     needs:
       - build
       - helm-validate
+
+    if: github.event.pull_request.head.repo.full_name == github.repository
 
     runs-on: ubuntu-latest
 
@@ -103,9 +95,47 @@ jobs:
           file: app/spring-petclinic-observability-demo-service/Dockerfile
           push: true
           tags: |
-            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}
 
-      - name: Show published image
+
+  update-gitops:
+    needs:
+      - docker-publish
+
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+
+      - name: Update image tag
         run: |
-          echo "Published image:"
-          echo "${DOCKER_IMAGE}:${GITHUB_SHA}"
+          FILE="kubernetes/observability-demo-service/values.yaml"
+
+          sed -i \
+            "s|^  tag:.*|  tag: \"${GITHUB_RUN_ID}\"|" \
+            "$FILE"
+
+          echo "Updated image:"
+          grep -A3 "^image:" "$FILE"
+
+      - name: Commit image promotion
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add kubernetes/observability-demo-service/values.yaml
+
+          git commit \
+            -m "ci: promote observability-demo-service image ${GITHUB_RUN_ID}" \
+            || echo "No changes to commit"
+
+          git push origin HEAD:${{ github.head_ref }}
