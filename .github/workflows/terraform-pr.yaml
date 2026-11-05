@@ -36,8 +36,21 @@ jobs:
 
       - name: Validate
         run: |
-          terraform -chdir=terraform init -backend=false -input=false
-          terraform -chdir=terraform validate
+          for ROOT in terraform terraform/observability; do
+            echo "Validating ${ROOT}"
+            terraform -chdir="${ROOT}" init -backend=false -input=false
+            terraform -chdir="${ROOT}" validate
+          done
+
+      # Moved from api-gateway CI, which no longer triggers on terraform/**.
+      - name: Trivy config scan (Terraform)
+        uses: aquasecurity/trivy-action@v0.25.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: '1'
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4

@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synthetics-agent
+  namespace: elastic
+
+---
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: synthetics-agent
+  namespace: elastic
+
+spec:
+  version: 9.5.5
+
+  kibanaRef:
+    name: petclinic-kibana
+
+  fleetServerRef:
+    name: fleet-server
+
+  mode: fleet
+  # Preconfigured in kibana.yaml (xpack.fleet.agentPolicies), so this id is
+  # the same on every rebuild.
+  policyID: synthetics-private-location
+
+  deployment:
+    replicas: 1
+
+    podTemplate:
+      spec:
+        serviceAccountName: synthetics-agent
+        automountServiceAccountToken: false
+
+        nodeSelector:
+          role: observability
+
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+
+        securityContext:
+          runAsUser: 0
+
+        containers:
+          - name: agent
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+
+        volumes:
+          - name: agent-data
+            emptyDir: {}

@@ -552,27 +552,7 @@ jobs:
             --form file=@"${DASHBOARD_FILE}"
           echo
           echo "Petclinic Kibana dashboard restored."
-
-          echo "Importing Petclinic alert rules..."
-          "${KB_CURL[@]}" -X POST \
-            "https://${KB_HOST}:${KB_PORT}/api/saved_objects/_import?overwrite=true" \
-            -H "kbn-xsrf: true" \
-            --form file=@"kubernetes/elastic/alerts/petclinic-alerts.ndjson"
-
-          echo
-          echo "Re-enabling imported alert rules..."
-          # Imported rules always arrive disabled; enabling re-creates their API keys.
-          for RULE_ID in \
-            a48298bc-b981-43ce-8390-a9370c08e964 \
-            b8f34a97-b252-41f6-8e49-085034accb0f
-          do
-            "${KB_CURL[@]}" -X POST \
-              "https://${KB_HOST}:${KB_PORT}/api/alerting/rule/${RULE_ID}/_enable" \
-              -H "kbn-xsrf: true"
-          done
-
-          echo
-          echo "Petclinic alert rules restored and enabled."
+          # Alert rules are applied by Terraform in the last step of this job.
 
       - name: Verify ECK logging stack
         if: ${{ inputs.deploy_eck }}
@@ -1013,6 +993,74 @@ jobs:
           echo "api-gateway Prometheus endpoint did not respond in time"
           cat /tmp/api-gateway-portforward.log || true
           exit 1
+
+      # Fleet Server, then the Synthetics private-location agent. Both Fleet
+      # policies are preconfigured in kibana.yaml with fixed ids, so a fresh
+      # Kibana already has them and these agents enroll with no clicks.
+      - name: Deploy Fleet Server and Synthetics agent
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+
+          wait_agent() {
+            for i in $(seq 1 60); do
+              HEALTH=$(kubectl -n elastic get agent "$1" -o jsonpath='{.status.health}' 2>/dev/null || true)
+              echo "$1 health=${HEALTH}"
+              if [ "$HEALTH" = "green" ]; then
+                return 0
+              fi
+              sleep 10
+            done
+            echo "$1 did not become healthy."
+            kubectl -n elastic describe agent "$1" || true
+            kubectl -n elastic logs -l "agent.k8s.elastic.co/name=$1" --tail=100 || true
+            return 1
+          }
+
+          kubectl apply -f kubernetes/elastic/fleet-server.yaml
+          wait_agent fleet-server
+
+          kubectl apply -f kubernetes/elastic/synthetics-agent.yaml
+          wait_agent synthetics-agent
+
+      # Alert rules, their connector and the Synthetics private location live in
+      # terraform/observability. This runs last so a failure here cannot block the
+      # platform, and EDOT data is already flowing. The S3 state still lists the
+      # previous cluster's objects; the provider reads them as gone and recreates
+      # them, so no state surgery.
+      - name: Apply Kibana alert rules and Synthetics location (Terraform)
+        if: ${{ inputs.deploy_eck }}
+        run: |
+          set -euo pipefail
+          ES_PW=$(kubectl -n elastic get secret petclinic-logs-es-elastic-user \
+            -o go-template='{{.data.elastic | base64decode}}')
+          echo "::add-mask::${ES_PW}"
+
+          KB_PORT=15601
+          kubectl -n elastic port-forward svc/petclinic-kibana-kb-http "${KB_PORT}:5601" \
+            >"$RUNNER_TEMP/kibana-tf-port-forward.log" 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+
+          echo "Waiting for Kibana API through the port-forward..."
+          for i in $(seq 1 30); do
+            if curl -ksf -u "elastic:${ES_PW}" "https://127.0.0.1:${KB_PORT}/api/status" >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Kibana API was not reachable through the port-forward."
+              cat "$RUNNER_TEMP/kibana-tf-port-forward.log" || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          export KIBANA_ENDPOINT="https://127.0.0.1:${KB_PORT}"
+          export KIBANA_USERNAME="elastic"
+          export KIBANA_PASSWORD="${ES_PW}"
+
+          terraform -chdir=terraform/observability init -input=false
+          terraform -chdir=terraform/observability apply -input=false -auto-approve
 
       - name: Dump customers-service diagnostics on failure
         if: failure()
